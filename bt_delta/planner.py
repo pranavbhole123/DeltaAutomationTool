@@ -93,6 +93,59 @@ def hidl_version_at_least(actual, minimum):
     return actual_parts + (0,) * (width - len(actual_parts)) >= minimum_parts + (0,) * (width - len(minimum_parts))
 
 
+def hcf_blocks(source):
+    found = []
+    pattern = r"(?m)^\s*ifneq\s*\(\s*\$\(filter\s+([^,]+),\s*\$\(TARGET_PRODUCT\)\s*\)\s*,\s*\)(.*?)^\s*endif\b[^\r\n]*"
+    for match in re.finditer(pattern, source, re.S):
+        body = match[2]
+        if re.search(r"\b(?:ifeq|ifneq|ifdef|ifndef)\b", body):
+            continue
+        variant_match = re.search(r"\$\(HCF_PATH\)/([A-Za-z0-9_.-]+)", body)
+        if not (variant_match and "$(TARGET_COPY_OUT_VENDOR)/firmware/wifi" in body and
+                "PRODUCT_COPY_FILES" in body and "find-copy-subdir-files" in body):
+            continue
+        start = match.start()
+        line_start = source.rfind("\n", 0, start) + 1
+        previous_end = max(0, line_start - 1)
+        previous_start = source.rfind("\n", 0, previous_end) + 1
+        if source[previous_start:previous_end].strip().startswith("#"):
+            start = previous_start
+        found.append({"variant": variant_match[1], "products": match[1].split(),
+                      "text": source[start:match.end()].strip(),
+                      "start": start, "end": match.end()})
+    return found
+
+
+
+def select_hcf_block(reference_text, config):
+    reference_blocks = hcf_blocks(reference_text)
+    if not reference_blocks:
+        raise ValueError("No recognized HCF TARGET_PRODUCT copy block in reference bluetooth.mk")
+    configured = config.get("hcf_variant", "")
+    if configured:
+        candidates = [item for item in reference_blocks if item["variant"] == configured]
+    else:
+        model = config["model"].lower()
+        candidates = [item for item in reference_blocks if item["variant"].lower().startswith(model)]
+        if not candidates and len(reference_blocks) == 1:
+            candidates = reference_blocks
+    if len(candidates) != 1:
+        found = ", ".join(sorted(item["variant"] for item in reference_blocks))
+        raise ValueError(f"Cannot uniquely infer HCF model folder for {config['model']}; reference bluetooth.mk contains: {found}")
+    selected = candidates[0]
+    variant = selected["variant"]
+    config["hcf_variant"] = variant
+    if not config.get("products"):
+        config["products"] = list(selected["products"])
+    missing = {product for product in config["products"]
+               if not any(re.fullmatch(re.escape(pattern).replace("%", ".*"), product)
+                          for pattern in selected["products"])}
+    if missing:
+        raise ValueError("Selected HCF copy filter does not cover TARGET_PRODUCT: " + ", ".join(sorted(missing)))
+
+    return selected
+
+
 class Planner:
     def __init__(self, p4, config, catalog=None):
         self.p4 = p4
@@ -103,6 +156,7 @@ class Planner:
         self.edits = {}
         self.results = []
         self.previews = []
+        self.rule_paths = []
 
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
         """Record inspection-only content; it is never passed to the executor."""
@@ -232,6 +286,7 @@ class Planner:
             return seal(plan)
         for source_rule in self.catalog["rules"]:
             rule = substitute(source_rule, self.variables)
+            self.rule_paths = []
             # A failed rule must not leave a partial edit in the plan.
             saved_edits = json.loads(json.dumps(self.edits))
             results_start = len(self.results)
@@ -240,7 +295,7 @@ class Planner:
             except Exception as exc:
                 self.edits = saved_edits
                 del self.results[results_start:]
-                self.result(rule, "blocked", str(exc))
+                self.result(rule, "blocked", str(exc), self.rule_paths)
                 if isinstance(exc, PerforceTimeout):
                     self.result({"id": "planning.stopped", "title": "Planning stopped", "source": "Perforce connection"},
                                 "blocked", "Remaining rules were not run after the request timeout. Fix the reported request and generate a fresh plan.")
@@ -269,6 +324,7 @@ class Planner:
             sources = [r["depotFile"] for r in source] if isinstance(source, list) else [source]
             for src in sources:
                 dst = self.resolver.counterpart(src, scope)
+                self.rule_paths.append(dst)
                 source_snapshot = self.snapshot(src)
                 target_snapshot = self.snapshot(dst, optional=True)
                 content = base64.b64decode(source_snapshot["content"])
@@ -288,6 +344,7 @@ class Planner:
         if kind == "verify_hcf":
             return self.verify_hcf(rule)
         path = self.resolver.discover("current", scope, target)
+        self.rule_paths = [path]
         if kind == "verify_firmware":
             snap = self.snapshot(path)
             expected = self.config.get("firmware_sha256", "").lower()
@@ -420,57 +477,14 @@ class Planner:
     def verify_hcf(self, rule):
         reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
         current_mk = self.resolver.discover("current", "vendor", "hcf_makefile")
+        self.rule_paths = [current_mk]
         reference_text, _ = decode(self.content(reference_mk))
         current_text, current_encoding = decode(self.content(current_mk))
 
-        def parse_blocks(source):
-            found = []
-            pattern = r"(?m)^\s*ifneq\s*\(\s*\$\(filter\s+([^,]+),\s*\$\(TARGET_PRODUCT\)\s*\)\s*,\s*\)(.*?)^\s*endif\b[^\r\n]*"
-            for match in re.finditer(pattern, source, re.S):
-                body = match[2]
-                if re.search(r"\b(?:ifeq|ifneq|ifdef|ifndef)\b", body):
-                    continue
-                variant_match = re.search(r"\$\(HCF_PATH\)/([A-Za-z0-9_.-]+)", body)
-                if not (variant_match and "$(TARGET_COPY_OUT_VENDOR)/firmware/wifi" in body and
-                        "PRODUCT_COPY_FILES" in body and "find-copy-subdir-files" in body):
-                    continue
-                start = match.start()
-                line_start = source.rfind("\n", 0, start) + 1
-                previous_end = max(0, line_start - 1)
-                previous_start = source.rfind("\n", 0, previous_end) + 1
-                if source[previous_start:previous_end].strip().startswith("#"):
-                    start = previous_start
-                found.append({"variant": variant_match[1], "products": match[1].split(),
-                              "text": source[start:match.end()].strip(),
-                              "start": start, "end": match.end()})
-            return found
-
-        reference_blocks = parse_blocks(reference_text)
-        if not reference_blocks:
-            raise ValueError("No recognized HCF TARGET_PRODUCT copy block in reference bluetooth.mk")
-        configured = self.config.get("hcf_variant", "")
-        if configured:
-            candidates = [item for item in reference_blocks if item["variant"] == configured]
-        else:
-            model = self.config["model"].lower()
-            candidates = [item for item in reference_blocks if item["variant"].lower().startswith(model)]
-            if not candidates and len(reference_blocks) == 1:
-                candidates = reference_blocks
-        if len(candidates) != 1:
-            found = ", ".join(sorted(item["variant"] for item in reference_blocks))
-            raise ValueError(f"Cannot uniquely infer HCF model folder for {self.config['model']}; reference bluetooth.mk contains: {found}")
-        selected = candidates[0]
+        selected = select_hcf_block(reference_text, self.config)
         variant = selected["variant"]
-        self.config["hcf_variant"] = variant
-        if not self.config.get("products"):
-            self.config["products"] = list(selected["products"])
-        missing = {product for product in self.config["products"]
-                   if not any(re.fullmatch(re.escape(pattern).replace("%", ".*"), product)
-                              for pattern in selected["products"])}
-        if missing:
-            raise ValueError("Selected HCF copy filter does not cover TARGET_PRODUCT: " + ", ".join(sorted(missing)))
 
-        current_candidates = [item for item in parse_blocks(current_text) if item["variant"] == variant]
+        current_candidates = [item for item in hcf_blocks(current_text) if item["variant"] == variant]
         if len(current_candidates) > 1:
             raise ValueError(f"Current bluetooth.mk has duplicate HCF filter blocks for {variant}")
         nl = "\r\n" if "\r\n" in current_text else "\n"
@@ -519,6 +533,7 @@ class Planner:
                 self.result(rule, "review", f"No same-region counterpart for {relative}; no cross-region copy.")
                 continue
             src, dst = reference[relative], current[relative]
+            self.rule_paths.append(dst)
             source_text, _ = decode(base64.b64decode(self.snapshot(src)["content"]))
             target_text, encoding = decode(self.content(dst))
             def no_duplicates(pairs):
@@ -591,7 +606,9 @@ def summary(plan):
     counts = {status: sum(c["status"] == status for c in plan["checks"]) for status in ("pass", "change", "blocked", "review", "manual", "skipped")}
     lines = ["SLSI Bluetooth delta plan", f"Plan: {plan['digest']}", f"Mode: {plan['mode']}",
              f"Source: {plan['source']}", f"Files to change: {len(plan['changes'])}; checks: {counts}",
-             "Approval applies only to these exact changes. BLOCKED checks stay untouched and are reported after apply. Creates a pending changelist; never shelves or submits.", ""]
+             ("Inspection-only comparison plan; cannot be approved or applied. Basis: " + plan.get("comparison_basis", "")
+              if plan["mode"] == "comparison" else
+              "Approval applies only to these exact changes. BLOCKED checks stay untouched and are reported after apply. Creates a pending changelist; never shelves or submits."), ""]
     for key in ("current", "reference"):
         lines.append(f"{key}: {json.dumps(plan['config'][key])}")
     lines.append("Resolved model settings: " + json.dumps({k: plan["config"].get(k) for k in ("model", "chipset", "firmware", "ap", "jdm", "hcf_variant", "products")}))
@@ -599,7 +616,8 @@ def summary(plan):
         lines.extend(["", f"[{check['status'].upper()}] {check['title']} ({check['source']})", check["message"], *check["paths"]])
     for change in plan["changes"]:
         lines.extend(["", "=" * 72, f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}",
-                      f"Workspace file: {change['local_path']}", "Checklist: " + ", ".join(change["sources"]), change["diff"]])
+                      f"Workspace file: {change['local_path']}" if change['local_path'] else "Comparison only; no local workspace target required.",
+                      "Checklist: " + ", ".join(change["sources"]), change["diff"]])
     return "\n".join(lines) + "\n"
 
 

@@ -1,0 +1,183 @@
+"""Generate checklist/reference content as if each destination file were blank."""
+from __future__ import annotations
+
+import base64
+import copy
+import difflib
+import json
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+
+from .perforce import PerforceTimeout
+from .planner import (Planner, canonical, decode, digest, make_values, name_selector,
+                      seal, select_hcf_block, substitute)
+from .reference import augment_actions_from_reference, copy_make_settings
+from .transforms import transform
+
+
+class BlankPlanner(Planner):
+    """Current templates supply destinations only; current content is never read."""
+
+    def write_blank(self, path, content, rule, *, file_type="text", reference_path=None):
+        content = content.encode("utf-8") if isinstance(content, str) else content
+        previous = self.edits.get(path)
+        self.edits[path] = {"path": path, "local_path": "", "revision": None,
+                            "type": file_type, "before": "", "before_sha256": None,
+                            "after": base64.b64encode(content).decode("ascii"),
+                            "after_sha256": digest(content),
+                            "rules": list(dict.fromkeys((previous or {}).get("rules", []) + [rule["id"]])),
+                            "sources": list(dict.fromkeys((previous or {}).get("sources", []) + [rule["source"]]))}
+        try:
+            text, _ = decode(content)
+            diff = "".join(difflib.unified_diff([], text.splitlines(True), fromfile=path + " (blank)",
+                                              tofile=path + " (blank plan)"))
+        except UnicodeDecodeError:
+            diff = f"Binary reference content: {len(content)} bytes; SHA-256 {digest(content)}"
+        self.edits[path]["diff"] = diff
+        self.preview(rule, path, content, reference_path=reference_path,
+                     note="Content generated for a blank destination from reference/checklist rules.")
+        self.result(rule, "change", "Included in the blank plan, independent of current file content.", [path])
+
+    def blank_content(self, path):
+        return decode(base64.b64decode(self.edits[path]["after"]))[0] if path in self.edits else ""
+
+    def build(self):
+        plan = {"schema_version": 1, "mode": "comparison", "created_at": datetime.now(timezone.utc).isoformat(),
+                "catalog_sha256": digest(canonical(self.catalog)), "source": self.catalog["source"],
+                "connection": self.config["perforce"], "identity": self.p4.identity(),
+                "workspace": self.p4.workspace_spec(),
+                "comparison_basis": "Blank destination files; latest reference content and checklist rules."}
+        try:
+            self.context()
+        except Exception as exc:
+            self.result({"id": "setup", "title": "Resolve blank-plan inputs", "source": "Inputs"}, "blocked", str(exc))
+        else:
+            for source_rule in self.catalog["rules"]:
+                rule = substitute(source_rule, self.variables)
+                self.rule_paths = []
+                previous = copy.deepcopy(self.edits)
+                previews_start, results_start = len(self.previews), len(self.results)
+                try:
+                    self.blank_rule(rule)
+                except Exception as exc:
+                    self.edits = previous
+                    del self.previews[previews_start:]
+                    del self.results[results_start:]
+                    self.result(rule, "blocked", str(exc), self.rule_paths)
+                    if isinstance(exc, PerforceTimeout):
+                        self.result({"id": "planning.stopped", "title": "Blank planning stopped", "source": "Perforce"},
+                                    "blocked", "Remaining rules were not run after a timeout.")
+                        break
+        plan.update(config=self.config, templates=self.resolver.specs if hasattr(self, "resolver") else {},
+                    checks=self.results, snapshots=list(self.snapshots.values()),
+                    changes=list(self.edits.values()), previews=self.previews)
+        return seal(plan)
+
+    def blank_rule(self, rule):
+        kind, scope, target = rule["kind"], rule["scope"], rule["target"]
+        if kind in ("manual", "verify_hals", "verify_firmware"):
+            paths = [] if kind == "manual" else [self.resolver.blank_target(scope, target)]
+            self.result(rule, "manual", rule.get("notes", "Verification-only rule; contributes no blank-file content."), paths)
+            return
+        if kind == "carrier_features":
+            return self.blank_carrier(rule)
+        if kind in ("copy_if_reference", "copy_tree_if_reference"):
+            source = self.resolver.discover("reference", scope, target, optional=True)
+            if not source:
+                self.result(rule, "skipped", "No reference file to include in the blank plan.")
+                return
+            sources = [item["depotFile"] for item in source] if isinstance(source, list) else [source]
+            for src in sources:
+                path = self.resolver.counterpart(src, scope)
+                self.rule_paths.append(path)
+                snapshot = self.snapshot(src)
+                self.write_blank(path, base64.b64decode(snapshot["content"]), rule,
+                                 file_type=snapshot["type"], reference_path=src)
+            return
+        if kind == "verify_hcf":
+            src = self.resolver.discover("reference", scope, "hcf_makefile")
+            path = self.resolver.blank_target(scope, "hcf_makefile")
+            self.rule_paths = [path]
+            reference, _ = decode(self.content(src))
+            selected = select_hcf_block(reference, self.config)
+            self.write_blank(path, selected["text"] + "\n", rule, reference_path=src)
+            return
+        path = self.resolver.blank_target(scope, target)
+        self.rule_paths = [path]
+        current_blank = self.blank_content(path)
+        src = None
+        if kind == "reference_make_settings":
+            src = self.resolver.discover("reference", scope, target)
+            reference, _ = decode(self.content(src))
+            if "WLAN_CHIP" in rule["keys"] and make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower() != self.config["chipset"]:
+                raise ValueError("Selected chipset differs from reference WLAN_CHIP")
+            after = copy_make_settings(current_blank, reference, rule["keys"], rule.get("include_basenames", []),
+                                       rule.get("key_patterns", []))
+        elif kind == "reference_features":
+            src = self.resolver.discover("reference", scope, target)
+            reference, _ = decode(self.content(src))
+            if rule["format"] == "make":
+                values = make_values(reference, rule["prefix"], rule.get("key_patterns", []))
+                after = transform(current_blank, {"type": "assignments", "values": values, "operator": "="})
+            else:
+                root = ET.fromstring(reference)
+                selected = name_selector(rule["prefix"], rule.get("key_patterns", []))
+                elements = [element for element in root.iter() if selected(element.tag)]
+                values = {element.tag: element.text or "" for element in elements}
+                if len(values) != len(elements) or any(len(element) for element in elements):
+                    raise ValueError("Duplicate/non-leaf reference floating feature elements")
+                after = transform(current_blank or f"<{root.tag}></{root.tag}>\n",
+                                  {"type": "xml_elements", "elements": values, "parent": root.tag})
+            if not values:
+                self.result(rule, "review", "Reference has no selected feature values.", [src, path])
+                return
+        elif kind == "transform":
+            actions = rule["actions"]
+            if any(any(key.startswith("reference_") for key in action) for action in actions):
+                src = self.resolver.discover("reference", scope, target)
+                reference, _ = decode(self.content(src))
+                actions = augment_actions_from_reference(reference, actions)
+            after = current_blank
+            for action in actions:
+                after = transform(after, action)
+        else:
+            raise ValueError(f"Unsupported blank-plan rule kind: {kind}")
+        self.write_blank(path, after, rule, reference_path=src)
+
+    def blank_carrier(self, rule):
+        root = self.config["reference"]["csc_path"].rstrip("/")
+        selected = name_selector(rule.get("prefix", "CarrierFeature_BT_"), rule.get("key_patterns", []))
+        records = self.p4.files(root + "/.../customer_carrier_feature_plain.json")
+        if not records:
+            self.result(rule, "review", "No reference regional carrier JSON files.")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError(f"Duplicate reference JSON key: {key}")
+                result[key] = value
+            return result
+        def keep(value):
+            if isinstance(value, dict):
+                output = {}
+                for key, child in value.items():
+                    if selected(key):
+                        output[key] = child
+                    elif isinstance(child, dict):
+                        nested = keep(child)
+                        if nested:
+                            output[key] = nested
+                    elif isinstance(child, list) and any(keep(item) for item in child):
+                        raise ValueError("Carrier features inside arrays need explicit keyed mapping")
+                return output
+            return {}
+        for record in records:
+            src = record["depotFile"]
+            path = self.config["current"]["csc_path"].rstrip("/") + src[len(root):]
+            self.rule_paths.append(path)
+            reference, _ = decode(self.content(src))
+            values = keep(json.loads(reference, object_pairs_hook=unique))
+            if values:
+                self.write_blank(path, json.dumps(values, indent=2, ensure_ascii=False) + "\n", rule, reference_path=src)
+            else:
+                self.result(rule, "skipped", "No selected carrier features in this reference region.", [src, path])

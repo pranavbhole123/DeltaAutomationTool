@@ -7,6 +7,7 @@ import sys
 import logging
 
 from .config import load
+from .comparison import compare_changelist, comparison_summary, save_comparison
 from .demo import demo_plan
 from .executor import execute
 from .perforce import P4CLI
@@ -23,6 +24,12 @@ def main(argv=None):
     plan.add_argument("config")
     plan.add_argument("--catalog", help="Optional JSON rule catalog")
     plan.add_argument("--out", default="reports/latest")
+    compare = commands.add_parser("compare", help="Read-only developer changelists versus blank-plan comparison")
+    compare.add_argument("config")
+    compare.add_argument("changelists", nargs="+", help="One or more changelist numbers (comma-separated numbers also accepted)")
+    compare.add_argument("--source", choices=("auto", "submitted", "shelved", "workspace"), default="auto")
+    compare.add_argument("--catalog", help="Optional JSON rule catalog")
+    compare.add_argument("--out", default="reports/comparison")
     apply = commands.add_parser("apply", help="Apply an explicitly approved saved plan")
     apply.add_argument("plan")
     apply.add_argument("--approve", required=True, help="Full SHA-256 printed in the reviewed plan")
@@ -45,6 +52,15 @@ def main(argv=None):
                              journal_path=source.parent / ("execution-" + saved["digest"][:12] + ".json"))
             print(json.dumps(result, indent=2))
             return 0
+        if args.command == "compare":
+            config = load(args.config)
+            catalog = json.loads(Path(args.catalog).read_text(encoding="utf-8")) if args.catalog else None
+            report = compare_changelist(P4CLI(config["perforce"]), config, " ".join(args.changelists),
+                                       source=args.source, catalog=catalog)
+            output = save_comparison(report, args.out)
+            print(comparison_summary(report))
+            print(f"Saved: {output.resolve()}")
+            return 2 if report["incomplete"] else 0
         if args.command == "demo":
             result = demo_plan(args.out)
         else:

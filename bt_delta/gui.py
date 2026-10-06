@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from .config import parse_details, validate
+from .comparison import compare_changelist, comparison_summary, parse_changelists, save_comparison
 from .demo import demo_plan
 from .executor import execute
 from .perforce import P4CLI
@@ -62,6 +63,13 @@ class App(ttk.Frame):
         self.tabs.add(self.preview, text="4. Empty-file preview")
         self.log_tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(self.log_tab, text="5. Live log")
+        self.comparison_tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(self.comparison_tab, text="6. Changelist comparison")
+        self.changelist = tk.StringVar()
+        self.comparison_source = tk.StringVar(value="auto")
+        self.comparison_status = tk.StringVar(value="Enter developer changelists to compare with the blank reference/checklist plan.")
+        self.changelist.trace_add("write", lambda *_: self.invalidate_comparison())
+        self.comparison_source.trace_add("write", lambda *_: self.invalidate_comparison())
         self.log_box = scrolledtext.ScrolledText(self.log_tab, wrap="word", font=("Consolas", 10), state="disabled")
         self.log_box.pack(fill="both", expand=True)
         self.templates.columnconfigure(1, weight=1)
@@ -106,6 +114,7 @@ class App(ttk.Frame):
         ttk.Label(self, textvariable=self.status, wraplength=1050).pack(anchor="w", pady=(10, 0))
         self.preview_box = scrolledtext.ScrolledText(self.preview, wrap="none", font=("Consolas", 10), state="disabled")
         self.preview_box.pack(fill="both", expand=True)
+        self.build_comparison_tab()
         self.set_config(json.loads((BASE / "examples" / "m36x.json").read_text(encoding="utf-8")))
         self.root.after(100, self.poll)
 
@@ -123,8 +132,75 @@ class App(ttk.Frame):
 
     def invalidate(self):
         self.approved.set(False)
+        self.invalidate_comparison()
         if hasattr(self, "apply_button"):
             self.apply_button.configure(state="disabled")
+
+    def invalidate_comparison(self):
+        if getattr(self, "comparison_report", None):
+            self.comparison_status.set("Inputs changed. Generate a fresh comparison; the displayed report uses the previous inputs.")
+
+    def build_comparison_tab(self):
+        inputs = ttk.Frame(self.comparison_tab)
+        inputs.pack(fill="x")
+        for column, (role, title) in enumerate((("current", "Current templates"), ("reference", "Reference templates"))):
+            frame = ttk.LabelFrame(inputs, text=title, padding=8)
+            frame.grid(row=0, column=column, sticky="nsew", padx=(0, 8) if column == 0 else 0)
+            inputs.columnconfigure(column, weight=1)
+            frame.columnconfigure(1, weight=1)
+            for row, (field, label) in enumerate((("system_template", "System"), ("vendor_template", "Vendor"), ("csc_path", "CSC path"))):
+                ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", padx=(0, 6), pady=3)
+                ttk.Entry(frame, textvariable=self.values[role + "." + field]).grid(row=row, column=1, sticky="ew", pady=3)
+        ttk.Label(self.comparison_tab, text="Template fields are shared with tab 1. Model, connection and path overrides come from tab 2.").pack(anchor="w", pady=(6, 4))
+        controls = ttk.Frame(self.comparison_tab)
+        controls.pack(fill="x", pady=6)
+        controls.columnconfigure(1, weight=1)
+        ttk.Label(controls, text="Developer changelists").grid(row=0, column=0, sticky="w")
+        ttk.Entry(controls, textvariable=self.changelist, width=45).grid(row=0, column=1, columnspan=3, sticky="ew", padx=8)
+        ttk.Label(controls, text="Content source").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Combobox(controls, textvariable=self.comparison_source, state="readonly", width=13,
+                     values=("auto", "submitted", "shelved", "workspace")).grid(row=1, column=1, sticky="w", padx=8)
+        self.compare_button = ttk.Button(controls, text="Generate blank plan & compare", command=self.compare)
+        self.compare_button.grid(row=1, column=3, sticky="e", padx=8)
+        ttk.Label(self.comparison_tab, text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Compares combined developer edits with blank-file content.", wraplength=1000).pack(anchor="w", pady=(0, 4))
+        ttk.Label(self.comparison_tab, text="Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.", wraplength=1000).pack(anchor="w", pady=(0, 4))
+        ttk.Label(self.comparison_tab, textvariable=self.comparison_status, wraplength=1000).pack(anchor="w", pady=(0, 6))
+        self.comparison_box = scrolledtext.ScrolledText(self.comparison_tab, wrap="none", font=("Consolas", 10), state="disabled")
+        self.comparison_box.pack(fill="both", expand=True)
+        for tag, foreground, background in (("diff_add", "#146c2e", "#e6f4ea"), ("diff_delete", "#b3261e", "#fce8e6"), ("diff_hunk", "#075985", "#e0f2fe")):
+            self.comparison_box.tag_configure(tag, foreground=foreground, background=background)
+
+    def compare(self):
+        if self.busy:
+            return
+        try:
+            config = self.get_config()
+            numbers, source = parse_changelists(self.changelist.get()), self.comparison_source.get()
+            captured = digest(canonical({"config": config, "numbers": numbers, "source": source}))
+            def complete(report):
+                self.comparison_report = report
+                folder = BASE / "reports" / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-compare-" + report["changelists"][0]["number"])
+                output = save_comparison(report, folder)
+                self.comparison_box.configure(state="normal")
+                self.comparison_box.delete("1.0", "end")
+                for line in comparison_summary(report).splitlines(keepends=True):
+                    self.comparison_box.insert("end", line, review_line_tag(line) or ())
+                self.comparison_box.configure(state="disabled")
+                self.tabs.select(self.comparison_tab)
+                self.comparison_status.set(f"{'Incomplete comparison' if report['incomplete'] else 'Comparison saved'}: {output}")
+                try:
+                    current = digest(canonical({"config": self.get_config(), "numbers": parse_changelists(self.changelist.get()),
+                                                "source": self.comparison_source.get()}))
+                except Exception:
+                    current = None
+                if current != captured:
+                    self.invalidate_comparison()
+                self.status.set(f"Read-only changelist comparison saved to {output}")
+            self.run(lambda: compare_changelist(P4CLI(config["perforce"], progress=self.progress), config,
+                                               numbers, source=source), complete,
+                     "Generating blank-file content and comparing edits from the selected changelists.")
+        except Exception as exc:
+            messagebox.showerror("Changelist comparison", str(exc))
 
     def set_config(self, config):
         self.extra_config = copy.deepcopy(config)
@@ -190,6 +266,7 @@ class App(ttk.Frame):
             return
         self.busy = True
         self.plan_button.configure(state="disabled")
+        self.compare_button.configure(state="disabled")
         self.apply_button.configure(state="disabled")
         self.status.set(message)
         self.tabs.select(self.log_tab)
@@ -214,6 +291,7 @@ class App(ttk.Frame):
                     continue
                 self.busy = False
                 self.plan_button.configure(state="normal")
+                self.compare_button.configure(state="normal")
                 if error:
                     self.progress("ERROR: " + error)
                     self.status.set(error)
@@ -227,6 +305,7 @@ class App(ttk.Frame):
             logging.exception("GUI result handling failed")
             self.busy = False
             self.plan_button.configure(state="normal")
+            self.compare_button.configure(state="normal")
             self.status.set("ERROR: " + str(exc))
         finally:
             self.root.after(100, self.poll)

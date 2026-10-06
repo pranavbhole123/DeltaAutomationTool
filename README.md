@@ -33,6 +33,39 @@ Each report contains `plan.txt` (readable summary and unified diffs), `empty-fil
 
 Rules use a static checklist baseline plus editable reference selectors. Static keys, commands, packages, includes, and HAL entries remain required. `key_patterns`, `reference_package_patterns`, `reference_line_patterns`, `reference_command_patterns`, `reference_comment_patterns`, and HAL `name_patterns` add Bluetooth-related statements found in the corresponding reference file. Dynamic Make selections are limited to active unconditional statements; conditional or duplicate selections are blocked for review. Init discovery stays inside the configured event and can use comments such as `# Bluetooth`, `# BT`, and `# A2DP` to identify model-specific command blocks. Edit these selectors in `checklist/slsi.json` when naming conventions change.
 
+## Compare bring-up changelists with the blank plan
+
+Open **6. Changelist comparison**, enter one or more developer changelists separated by commas or spaces (for example `123456, 123457, 123458`), and set the current/reference system and vendor templates and CSC roots. Template fields are shared with tab 1; model, Perforce connection and exact path overrides use tab 2. Click **Generate blank plan & compare**.
+
+The comparison generates blank destination files using the latest reference content and checklist rules. The current template supplies file destinations; its existing content does not determine what belongs in the blank plan. Reference headers/folder files, selected board statements, packages/includes, feature values, init commands, regional Bluetooth carrier values and the reference HCF filter block are included. Verification-only HAL/firmware/device checks are listed as manual items and contribute no blank write content.
+
+The report compares this blank-file content with the edits introduced by the selected changelists, per filename:
+
+- **Extra files:** developer files absent from the blank plan, including files outside the selected template mappings.
+- **Extra changes:** developer statements/values absent from the blank plan, including additional edits inside a planned file.
+- **Missing from changelists:** blank-plan items not introduced by the selected changes. Items already present before those changes are still listed here, since this is a comparison of the selected edits rather than current bring-up completeness.
+- **Matched:** blank-plan items introduced by those changes, with contributing changelist numbers.
+- **Unreadable/blocked:** incomplete comparisons requiring follow-up. Unreadable file content is not classified as a match or a missing item.
+
+Multiple changelists are combined per file. Submitted edits are processed in file-revision order, even if the numbers are entered in a different order. Content added in one selected changelist and removed/replaced in a later selected changelist is cancelled or superseded. Unselected intermediate edits are not included. Each changelist's original diff remains in the report. Pending edits follow submitted edits, in the order entered.
+
+Choose a content source, or leave **auto** selected:
+
+- **submitted:** extracts each file's own submitted edit using its submitted revision and preceding file revision. The blank plan always uses latest reference content; no historical template plan is generated.
+- **shelved:** reads a developer's shelved file contents, including another workspace's shelf. Its edits are extracted against depot head, so old shelves can include differences from later submissions. Only shelved files are included.
+- **workspace:** extracts unshelved edits from the configured local workspace against each file's have revision. Files must still be open in the specified changelist. Remote unshelved work must be shelved first.
+- **auto:** selects the appropriate source for each changelist independently, allowing a mixture of submitted and pending changelists.
+
+Comparison ignores line endings and outer whitespace. Make packages are compared by package name so additions to multiline lists can match a single-line blank statement. Init commands retain their event context, Make statements retain conditional context, and XML/JSON feature values retain their element/key paths. Comments are included. The report compares statement/value membership, not runtime behavior or semantic equivalence of arbitrary Make expressions. Binary content is compared by bytes and hashes. Raw diffs retain all original edits and ordering. Pending metadata and content are checked again before reporting.
+
+The tool saves `comparison.txt`, `comparison.json`, and a `blank-plan/` folder containing the generated blank files as a plan and previews. Comparison plans are inspection-only and cannot be applied. Comparison never syncs, opens, shelves or submits files, and it does not replace the regular apply plan.
+
+```powershell
+python main.py compare examples/m36x.json 123456 123457 123458 --out reports/bringup-comparison
+```
+
+CLI exit status is 2 for an incomplete comparison, 1 for an operation failure and 0 for a complete report; complete reports may still contain differences.
+
 ## How paths are resolved
 
 The Bluetooth header also uses only the mapped `EXYNOS/.../device/<common_device>/` folder. Change or add relative candidates in `checklist/slsi.json`:

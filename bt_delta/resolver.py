@@ -120,3 +120,30 @@ class Resolver:
     def counterpart(self, source, scope):
         relative = relative_for(self.views[f"reference.{scope}"], source)
         return translate_path(self.views[f"current.{scope}"], relative)
+
+    def blank_target(self, scope, target):
+        """Resolve a file destination from View routes without reading current files."""
+        existing = self.discover("current", scope, target, optional=True)
+        if existing:
+            return existing
+        view = self.views[f"current.{scope}"]
+        explicit = self.override("current", scope, target)
+        candidates = ([validate_depot_path(explicit)] if explicit else
+                      self._route_candidates(scope, target, view, False))
+        mapped = []
+        for path in candidates:
+            try:
+                relative_for(view, path)
+                mapped.append(path)
+            except MappingError:
+                continue
+        if len(mapped) > 1 and not explicit:
+            reference = self.discover("reference", scope, target, optional=True)
+            if reference:
+                translated = self.counterpart(reference, scope)
+                if translated in mapped:
+                    return translated
+        if len(mapped) != 1:
+            raise MappingError(f"current.{scope}.{target}: expected one blank-file destination, found "
+                               f"{', '.join(mapped) or 'none'}; set an exact path override")
+        return mapped[0]

@@ -212,6 +212,35 @@ class P4CLITests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.p4.files("//depot/...@all")
 
+    def test_describe_reads_every_indexed_file_with_no_mutation(self):
+        self.run.return_value = result(stat(change="100", status="submitted", user="developer", client="dev",
+                                            depotFile0="//depot/a", rev0="2", action0="edit", type0="text",
+                                            depotFile1="//depot/b", rev1="1", action1="add", type1="binary"))
+        value = self.p4.describe_change(100)
+        self.assertEqual(len(value["files"]), 2)
+        self.assertEqual(self.run.call_args.args[0][-3:], ["describe", "-s", "100"])
+        self.p4.describe_change(100, shelved=True)
+        self.assertEqual(self.run.call_args.args[0][-4:], ["describe", "-s", "-S", "100"])
+        self.assertFalse(self.p4.writes_enabled)
+
+    def test_describe_rejects_incomplete_records_and_invalid_numbers(self):
+        for record in (stat(change="100", status="submitted", depotFile1="//depot/a", rev1="1", action1="edit"),
+                       stat(change="100", status="submitted", depotFile0="//depot/a"),
+                       stat(change="99", status="submitted"), stat(change="100")):
+            self.run.return_value = result(record)
+            with self.assertRaises(PerforceError):
+                self.p4.describe_change(100)
+        for number in ("-f", "100@now", "default", True, 0):
+            with self.assertRaises(ValueError):
+                self.p4.describe_change(number)
+
+    def test_shelved_print_reads_exact_change_and_preserves_binary(self):
+        self.run.return_value = result({b"code": b"binary", b"data": b"\x00\xff\r\n"})
+        self.assertEqual(self.p4.read_shelved_file("//depot/file", 100), b"\x00\xff\r\n")
+        self.assertEqual(self.run.call_args.args[0][-3:], ["print", "-q", "//depot/file@=100"])
+        with self.assertRaises(ValueError):
+            self.p4.read_shelved_file("//depot/file@=200", 100)
+
     def test_add_rejects_nonliteral_local_paths(self):
         self.p4.enable_writes()
         for path in ("relative.txt", "C:/workspace/*", "C:/workspace/file@now", "C:/workspace/.../file"):

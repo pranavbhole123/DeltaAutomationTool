@@ -213,6 +213,9 @@ class P4CLI:
     def files(self, pattern: str) -> list[dict[str, Any]]:
         """Discover head file records; exclude delete and move/delete revisions."""
         pattern = validate_depot_path(pattern, allow_wildcards=True)
+        return self._file_records(pattern)
+
+    def _file_records(self, pattern):
         response = self._run("files", pattern, allow_empty=True)
         records = self._stats(response)
         if not records and not any(str(record.get("generic")) == str(EV_EMPTY) for record in response):
@@ -228,6 +231,12 @@ class P4CLI:
                 raise PerforceError(f"Cannot resolve a unique live revision for {path}")
             revision = files[0]["rev"]
         target = f"{path}#{_revision(revision)}"
+        return self._print_bytes(target)
+
+    def read_shelved_file(self, path: str, change: int | str) -> bytes:
+        return self._print_bytes(f"{validate_depot_path(path)}@={_revision(change)}")
+
+    def _print_bytes(self, target):
         records = self._run("print", "-q", target, binary_data=True)
         chunks: list[bytes] = []
         for record in records:
@@ -235,6 +244,34 @@ class P4CLI:
                 data = record.get("data", b"")
                 chunks.append(data if isinstance(data, bytes) else str(data).encode("utf-8"))
         return b"".join(chunks)
+
+    def describe_change(self, change: int | str, *, shelved=False) -> dict[str, Any]:
+        """Read every listed file; never request a truncated describe response."""
+        number = _revision(change)
+        options = ["-s", "-S"] if shelved else ["-s"]
+        records = self._stats(self._run("describe", *options, number))
+        if len(records) != 1 or str(records[0].get("change")) != number:
+            raise PerforceError(f"Expected a complete description of changelist {number}")
+        record = records[0]
+        if record.get("status") not in ("pending", "submitted"):
+            raise PerforceError("Changelist status is missing or unsupported")
+        indices = sorted(int(key[9:]) for key in record if re.fullmatch(r"depotFile[0-9]+", key))
+        if indices != list(range(len(indices))):
+            raise PerforceError("Changelist file list is incomplete")
+        files = []
+        for index in indices:
+            path = validate_depot_path(record[f"depotFile{index}"])
+            action = record.get(f"action{index}")
+            revision = record.get(f"rev{index}")
+            if not action or revision is None or not re.fullmatch(r"[0-9]+", str(revision)):
+                raise PerforceError(f"Missing action/revision for changelist file {path}")
+            files.append({"path": path, "action": action, "revision": int(revision),
+                          "type": record.get(f"type{index}", "")})
+        if len({item["path"] for item in files}) != len(files):
+            raise PerforceError("Duplicate changelist file paths")
+        return {"number": number, "status": record["status"], "user": record.get("user", ""),
+                "client": record.get("client", ""), "description": record.get("desc", ""),
+                "files": files}
 
     def fstat(self, path: str) -> dict[str, Any]:
         path = validate_depot_path(path)
