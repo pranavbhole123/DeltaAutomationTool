@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "path_rules": {
+    "system": {
+      "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/BoardConfigCommon.mk"},
+      "bluetooth_header": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/Bluetooth/bdroid_buildcfg.h"},
+      "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/device_common.mk"},
+      "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecProductFeature.common"},
+      "floating_feature": [
+        {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/floating_feature.xml"},
+        {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecFloatingFeature.xml"}
+      ],
+      "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"}
+    },
+    "vendor": {
+      "bluetooth_folder": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/Bluetooth"},
+      "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/BoardConfigCommon.mk"},
+      "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/device_common.mk"},
+      "model_init": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
+      "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/vendor/{common_device}/SecProductFeature.common"},
+      "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"},
+      "manifest": {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
+      "hcf_makefile": {"anchor": "/VENDOR/Cinnamon/vendor/", "relative": "samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"},
+      "hcf": {"anchor": "/VENDOR/Cinnamon/vendor/", "relative": "samsung/hardware/vendor/bluetooth/slsi/{chipset}/{hcf_variant}"},
+      "firmware": {"anchor": "/EXYNOS/android/", "relative": "vendor/samsung_slsi/mx140/firmware/{firmware}/mx140.bin"}
+    }
+  },
+  "source": "159551_BT Delta Checklist.xlsx / SLSI",
+  "chipsets": {
+    "s5e8535": "rice_s620",
+    "s5e8835": "quartz_s621p",
+    "s5e8825": "papaya_s620",
+    "s5e8845": "rose_s621p"
+  },
+  "rules": [
+    {
+      "id": "system.header",
+      "title": "Copy reference bdroid_buildcfg.h if absent",
+      "source": "SLSI!B4",
+      "scope": "system",
+      "target": "bluetooth_header",
+      "kind": "copy_if_reference"
+    },
+    {
+      "id": "system.board",
+      "title": "Copy reference system Bluetooth board settings",
+      "source": "SLSI!B6:C6",
+      "scope": "system",
+      "target": "board_config",
+      "kind": "reference_make_settings",
+      "keys": [
+        "WLAN_VENDOR",
+        "WLAN_CHIP",
+        "BOARD_HAVE_BLUETOOTH",
+        "BOARD_HAVE_BLUETOOTH_SLSI",
+        "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
+        "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
+      ],
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ],
+      "include_basenames": [
+        "BluetoothBoardConfigCommon.mk"
+      ]
+    },
+    {
+      "id": "system.packages",
+      "title": "System BluetoothAgent package",
+      "source": "SLSI!B8",
+      "scope": "system",
+      "target": "device_common",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "make_packages",
+          "packages": [
+            "BluetoothAgent"
+          ],
+          "reference_package_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "system.features",
+      "title": "Compare system Bluetooth product features with reference",
+      "source": "SLSI!B10:C10",
+      "scope": "system",
+      "target": "sec_product",
+      "kind": "reference_features",
+      "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ],
+      "format": "make"
+    },
+    {
+      "id": "system.floating",
+      "title": "Compare Bluetooth floating features with reference",
+      "source": "SLSI!B10:C10",
+      "scope": "system",
+      "target": "floating_feature",
+      "kind": "reference_features",
+      "prefix": "SEC_FLOATING_FEATURE_BLUETOOTH_",
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ],
+      "format": "xml"
+    },
+    {
+      "id": "csc.features",
+      "title": "Compare regional Bluetooth carrier features",
+      "source": "SLSI!C10",
+      "scope": "csc",
+      "target": "carrier_features",
+      "kind": "carrier_features",
+      "prefix": "CarrierFeature_BT_",
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ]
+    },
+    {
+      "id": "system.postfs",
+      "title": "System post-fs-data Bluetooth permissions",
+      "source": "SLSI!B12",
+      "scope": "system",
+      "target": "root_init",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "init_commands",
+          "event": "on post-fs-data",
+          "commands": [
+            "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
+            "chmod 0660 /data/misc/bluedroid/bt_config.conf",
+            "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
+            "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
+            "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
+          ],
+          "reference_command_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+          ],
+          "reference_comment_patterns": [
+            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "system.boot",
+      "title": "System boot Bluetooth paths and permissions",
+      "source": "SLSI!B13:B14",
+      "scope": "system",
+      "target": "root_init",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "init_commands",
+          "event": "on boot",
+          "commands": [
+            "mkdir /data/log 0775 system log",
+            "mkdir /data/log/bt 0770 bluetooth bluetooth",
+            "chown bluetooth bluetooth /dev/ttySAC1",
+            "chmod 0660 /dev/ttySAC1",
+            "setprop ro.bt.bdaddr_path \"{efs}/bluetooth/bt_addr\"",
+            "chown bluetooth bluetooth ro.bt.bdaddr_path",
+            "mkdir {efs}/bluetooth 0770 system bluetooth",
+            "chown system bluetooth {efs}/bluetooth",
+            "chown system bluetooth {efs}/bluetooth/bt_addr",
+            "chmod 0770 {efs}/bluetooth",
+            "chmod 0660 {efs}/bluetooth/bt_addr",
+            "chmod 0660 /dev/btpower",
+            "chown bluetooth system /dev/btpower",
+            "mkdir /data/vendor/ssrdump 0770 root system",
+            "chown bluetooth log /proc/bluetooth/uart/log"
+          ],
+          "reference_command_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+          ],
+          "reference_comment_patterns": [
+            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vendor.bluetooth",
+      "title": "Copy missing files from reference Bluetooth folder",
+      "source": "SLSI!B18",
+      "scope": "vendor",
+      "target": "bluetooth_folder",
+      "kind": "copy_tree_if_reference"
+    },
+    {
+      "id": "vendor.board",
+      "title": "Copy reference vendor Bluetooth board settings",
+      "source": "SLSI!B20",
+      "scope": "vendor",
+      "target": "board_config",
+      "kind": "reference_make_settings",
+      "keys": [
+        "BOARD_HAVE_BLUETOOTH",
+        "BOARD_HAVE_BLUETOOTH_SLSI",
+        "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
+        "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
+      ],
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ],
+      "include_basenames": [
+        "BluetoothBoardConfigCommon.mk"
+      ]
+    },
+    {
+      "id": "vendor.packages",
+      "title": "Vendor packages, includes and firmware family",
+      "source": "SLSI!B22",
+      "scope": "vendor",
+      "target": "device_common",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "make_packages",
+          "packages": [
+            "libbt-vendor",
+            "android.hardware.bluetooth@1.1-impl",
+            "android.hardware.bluetooth@1.1-service"
+          ],
+          "reference_package_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+          ]
+        },
+        {
+          "type": "ensure_lines",
+          "lines": [
+            "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk",
+            "include vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"
+          ],
+          "reference_line_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+          ]
+        },
+        {
+          "type": "assignments",
+          "values": {
+            "SLSI_WLBT_UNIFIED_FIRMWARE": "{firmware}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.init",
+      "title": "Vendor model init permissions (JDM aware)",
+      "source": "SLSI!B24:C24",
+      "scope": "vendor",
+      "target": "model_init",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "init_commands",
+          "event": "on init",
+          "commands": [
+            "chown bluetooth bluetooth /sys/module/scsc_bt/parameters/bluetooth_address"
+          ],
+          "reference_command_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+          ],
+          "reference_comment_patterns": [
+            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          ]
+        },
+        {
+          "type": "init_commands",
+          "event": "on post-fs-data",
+          "commands": [
+            "setprop ro.bt.bdaddr_path \"{efs}/bluetooth/bt_addr\"",
+            "chown bluetooth bluetooth ro.bt.bdaddr_path",
+            "mkdir {efs}/bluetooth 0770 system bluetooth",
+            "chown system bluetooth {efs}/bluetooth",
+            "chown system bluetooth {efs}/bluetooth/bt_addr",
+            "chmod 0770 {efs}/bluetooth",
+            "chmod 0660 {efs}/bluetooth/bt_addr"
+          ],
+          "reference_command_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+          ],
+          "reference_comment_patterns": [
+            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vendor.features",
+      "title": "Compare vendor Bluetooth product features with reference",
+      "source": "SLSI!B26",
+      "scope": "vendor",
+      "target": "sec_product",
+      "kind": "reference_features",
+      "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+      "key_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      ],
+      "format": "make"
+    },
+    {
+      "id": "vendor.postfs",
+      "title": "Vendor-template system root init permissions",
+      "source": "SLSI!B28",
+      "scope": "vendor",
+      "target": "root_init",
+      "kind": "transform",
+      "actions": [
+        {
+          "type": "init_commands",
+          "event": "on post-fs-data",
+          "commands": [
+            "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
+            "chmod 0660 /data/misc/bluedroid/bt_config.conf",
+            "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
+            "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
+            "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
+          ],
+          "reference_command_patterns": [
+            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+          ],
+          "reference_comment_patterns": [
+            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vendor.hals",
+      "title": "Verify Bluetooth HIDL entries",
+      "source": "SLSI!B30:C30",
+      "scope": "vendor",
+      "target": "manifest",
+      "kind": "verify_hals",
+      "name_patterns": [
+        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[._-])bt(?:[._-]|$)|a2dp)"
+      ],
+      "expected_hals": [
+        {
+          "name": "android.hardware.bluetooth",
+          "version": "1.0",
+          "interface": "IBluetoothHci"
+        },
+        {
+          "name": "vendor.samsung.hardware.bluetooth",
+          "version": "2.0",
+          "interface": "ISehBluetooth"
+        }
+      ]
+    },
+    {
+      "id": "vendor.hcf",
+      "title": "Verify HCF files and TARGET_PRODUCT copy filter",
+      "source": "SLSI!B32",
+      "scope": "vendor",
+      "target": "hcf",
+      "kind": "verify_hcf"
+    },
+    {
+      "id": "vendor.firmware",
+      "title": "Verify firmware and approved release",
+      "source": "SLSI!B34:C34",
+      "scope": "vendor",
+      "target": "firmware",
+      "kind": "verify_firmware"
+    },
+    {
+      "id": "device.validation",
+      "title": "After build: verify phone Bluetooth address and firmware",
+      "source": "SLSI!B36",
+      "scope": "device",
+      "target": "phone",
+      "kind": "manual",
+      "notes": "Compare the phone BT address with {efs}/bluetooth/bt_addr. Check BT firmware with *#2663#. Requires a built device."
+    }
+  ]
+}

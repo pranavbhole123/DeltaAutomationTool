@@ -1,0 +1,189 @@
+	SLSI Bringup Checklist		
+	Change Details	Notes	Column1
+	CHANGES ON SYSTEM TEMPLATE		
+	"//MODEL/PROD_VINCE/ONEUI_7_0/ONEUI_7_0_MR202502/Strawberry/EXYNOS/a35x_sssi/device/a35x_common/Bluetooth/bdroid_buildcfg.h
+Add file (if present in base model)"		
+			
+	"//MODEL/VINCE/Strawberry/EXYNOS/a35x_sssi/device/a35x_common/BoardConfigCommon.mk
+WLAN_VENDOR = 8
+WLAN_CHIP := ""s5e8835""
+# Bluetooth
+BOARD_HAVE_BLUETOOTH := true
+BOARD_HAVE_BLUETOOTH_SLSI := true
+BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := hardware/samsung_slsi/libbt/include
+BLUEDROID_HCI_VENDOR_STATIC_LINKING := false   
+
+#A2DP
+include vendor/samsung/interfaces/bluetooth/BluetoothBoardConfigCommon.mk"	Confirm BT chip vendor & version.	
+			
+	"//MODEL/VINCE/Strawberry/EXYNOS/a35x_sssi/device/a35x_common/device_common.mk
+# BT
+PRODUCT_PACKAGES += \
+    BluetoothAgent
+"	"
+"	
+			
+	"Verify SecProductFeature and sec FloatingFeature Flag
+//MODEL/VINCE/Strawberry/EXYNOS/a35x_sssi/vendor/a35x_common/SecProductFeature.common
+
+# Bluetooth
+SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD=TRUE
+SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_DUAL_PLAY=TRUE
+SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_HEAD_SAR_BACKOFF=TRUE"	"Refer to previous OS of the model / Refer BT Feature Flags tab
+
+All of the previous files will be found in the MODEL branch of the SYSTEM TEMPLATE
+Changing a feature according to region.
+
+//UTAH_CSC/Strawberry/EXYNOS/gts9fep/OMC/OXM/INS/system/customer_carrier_feature_plain.json
+""CarrierFeature_BT_EnableSAP"": ""FALSE"""	
+			
+	"//VINCE/SYSTEM/Strawberry/ESSI/android/system/core/rootdir/init.rc
+ 
+on post-fs-data
+    mkdir /data/misc/bluedroid 02770 bluetooth bluetooth
+    # Fix the access permissions and group ownership for 'bt_config.conf'
+    chmod 0660 /data/misc/bluedroid/bt_config.conf
+    chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf
+    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth
+    mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"		
+	"on boot
+    # BT: create data/log/bt for snoop log
+    mkdir /data/log 0775 system log
+    mkdir /data/log/bt 0770 bluetooth bluetooth
+
+    # bluetooth tty port
+    chown bluetooth bluetooth /dev/ttySAC1
+    chmod 0660 /dev/ttySAC1
+
+    # permissions for bluetooth.
+    setprop ro.bt.bdaddr_path ""/mnt/vendor/efs/bluetooth/bt_addr""
+    chown bluetooth bluetooth ro.bt.bdaddr_path
+    chmod 0660 /dev/btpower
+    chown bluetooth system /dev/btpower
+
+    # for BT MAC address
+    mkdir /mnt/vendor/efs/bluetooth 0770 system bluetooth"		
+	"    # if already exist
+    chown system bluetooth /mnt/vendor/efs/bluetooth
+    chown system bluetooth /mnt/vendor/efs/bluetooth/bt_addr
+    chmod 0770 /mnt/vendor/efs/bluetooth
+    chmod 0660 /mnt/vendor/efs/bluetooth/bt_addr
+
+    # Create directory used for bt chip dump collection
+    mkdir /data/vendor/ssrdump 0770 root system
+
+    # Bluetooth : for uart log
+    chown bluetooth log /proc/bluetooth/uart/log"		
+			
+	Changes on VENDOR TEMPLATE		
+			
+	Add file Bluetooth Folder if present in base model		
+			
+	"//MODEL/VINCE/VENDOR_TIGER_ONEUI_5_1/Strawberry/EXYNOS/a35x_vendor/device/a35x_common/BoardConfigCommon.mk
+
+# Bluetooth
+BOARD_HAVE_BLUETOOTH := true
+BOARD_HAVE_BLUETOOTH_SLSI := true
+BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := hardware/samsung_slsi/libbt/include
+BLUEDROID_HCI_VENDOR_STATIC_LINKING := false
+
+include vendor/samsung/interfaces/bluetooth/BluetoothBoardConfigCommon.mk"		
+			
+	"//MODEL/VINCE/VENDOR_TIGER_ONEUI_5_1/Strawberry/EXYNOS/a35x_vendor/device/a35x_common/device_common.mk
+
+# Bluetooth
+PRODUCT_PACKAGES += \
+    libbt-vendor \
+    android.hardware.bluetooth@1.1-impl \
+    android.hardware.bluetooth@1.1-service
+
+include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk
+include vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/bluetooth.mk
+
+# Wifi
+SLSI_WLBT_UNIFIED_FIRMWARE := quartz_s621p"		
+			
+	"//MODEL/VINCE/VENDOR_TIGER_ONEUI_5_1/Strawberry/EXYNOS/a35x_vendor/device/a35x_common/init.a35x.rc
+on init
+ ## SCSC BT
+    chown bluetooth bluetooth /sys/module/scsc_bt/parameters/bluetooth_address
+
+on post-fs-data
+# permissions for bluetooth.
+    setprop ro.bt.bdaddr_path ""/mnt/vendor/efs/bluetooth/bt_addr""
+    chown bluetooth bluetooth ro.bt.bdaddr_path
+# for BT MAC address
+    mkdir /mnt/vendor/efs/bluetooth 0770 system bluetooth
+# if already exist
+    chown system bluetooth /mnt/vendor/efs/bluetooth
+    chown system bluetooth /mnt/vendor/efs/bluetooth/bt_addr
+    chmod 0770 /mnt/vendor/efs/bluetooth
+    chmod 0660 /mnt/vendor/efs/bluetooth/bt_addr"	"permission entry should be done within   on init
+
+permission entry should be done within on post-fs-dataIn case of JDM models, don.t add /mnt/vendor"	
+			
+	"//MODEL/VINCE/VENDOR_TIGER_ONEUI_5_1/Strawberry/EXYNOS/a35x_vendor/vendor/a35x_common/SecProductFeature.common
+
+# Bluetooth
+SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD=TRUE
+SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_DUAL_PLAY=TRUE"	All of the previous files will be found in the MODEL branch of the VENDOR TEMPLATE	
+			
+	"//VINCE/VENDOR_TIGER_ONEUI_5_1/SYSTEM/Strawberry/ESSI/android/system/core/rootdir/init.rc
+
+    mkdir /data/misc/bluedroid 02770 bluetooth bluetooth
+    # Fix the access permissions and group ownership for 'bt_config.conf'
+    chmod 0660 /data/misc/bluedroid/bt_config.conf
+    chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf
+    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth
+    mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"		
+			
+	"//VINCE/VENDOR_TIGER_ONEUI_5_1/VENDOR/Strawberry/EXYNOS/android/device/samsung/erd8835/manifest.xml
+    <hal format=""hidl"">
+        <name>android.hardware.bluetooth</name>
+        <transport>hwbinder</transport>
+        <version>1.0</version>
+        <interface>
+            <name>IBluetoothHci</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+
+<!-- Bluetooth Vendor -->
+    <hal format=""hidl"">
+        <name>vendor.samsung.hardware.bluetooth</name>
+        <transport>hwbinder</transport>
+        <version>2.0</version>
+        <interface>
+            <name>ISehBluetooth</name>
+            <instance>default</instance>
+        </interface>
+    </hal>"	"Verify Bluetooth HIDL entry in manifest.xml
+
+For chipset S5e8835, check manifest of erd8835 and vice versa"	
+			
+	"//VINCE/VENDOR_TIGER_ONEUI_5_1/VENDOR/Cinnamon/vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/a35xxx/
+Check this folder to make sure hcf file is present here
+
+//VINCE/VENDOR_TIGER_ONEUI_5_1/VENDOR/Cinnamon/vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/bluetooth.mk
+Also check model filter for hcf file 
+
+# a35xxx
+ifneq ($(filter a35xxx a35xzh a35xks a35xjvxx a35xue a35xsq a35xtfn a35xcs, $(TARGET_PRODUCT)),)
+        PRODUCT_COPY_FILES += $(call find-copy-subdir-files,*,$(HCF_PATH)/a35xxx,$(TARGET_COPY_OUT_VENDOR)/firmware/wifi)
+endif"		
+			
+	"Check if the FW Path is having latest firmware:
+//VINCE/VENDOR_TIGER_ONEUI_5_1/VENDOR/Strawberry/EXYNOS/android/vendor/samsung_slsi/mx140/firmware/quartz_s621p/mx140.bin
+"	"SLSI Chipset mapping:
+
+""s5e8535"": ""rice_s620"", 
+""s5e8835"": ""quartz_s621p"", 
+""s5e8825"": ""papaya_s620"", 
+""s5e8845"": ""rose_s621p"""	
+			
+	"Verify BT address in phone status and compare it with :
+/mnt/vendor/efs/bluetooth/bt_addr
+
+To check BT Firmware:  *#2663#"		
+			
+			
