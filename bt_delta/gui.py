@@ -42,6 +42,7 @@ class App(ttk.Frame):
         self.values = {}
         self.approved = tk.BooleanVar(value=False)
         self.jdm = tk.BooleanVar(value=False)
+        self.check_csc_features = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Enter project details, then generate a read-only plan.")
         ttk.Label(self, text="SLSI Bluetooth Delta", font=("Segoe UI", 20, "bold")).pack(anchor="w")
         ttk.Label(self, text="Template views → checklist checks → file diffs → your approval → pending changelist").pack(anchor="w", pady=(2, 12))
@@ -67,7 +68,7 @@ class App(ttk.Frame):
         self.tabs.add(self.comparison_tab, text="6. Changelist comparison")
         self.changelist = tk.StringVar()
         self.comparison_source = tk.StringVar(value="auto")
-        self.comparison_status = tk.StringVar(value="Enter developer changelists to compare with the blank reference/checklist plan.")
+        self.comparison_status = tk.StringVar(value="Enter developer changelists to compare with tab 4 Empty-file preview.")
         self.changelist.trace_add("write", lambda *_: self.invalidate_comparison())
         self.comparison_source.trace_add("write", lambda *_: self.invalidate_comparison())
         self.log_box = scrolledtext.ScrolledText(self.log_tab, wrap="word", font=("Consolas", 10), state="disabled")
@@ -80,6 +81,9 @@ class App(ttk.Frame):
             for field, label in (("system_template", "System template"), ("vendor_template", "Vendor template"), ("csc_path", "CSC model path")):
                 self.entry(self.templates, role + "." + field, label, row)
                 row += 1
+        ttk.Checkbutton(self.templates, text="Check CSC features", variable=self.check_csc_features,
+                        command=self.invalidate).grid(row=row, column=1, sticky="w", pady=5)
+        row += 1
         ttk.Label(self.templates, text="Or paste C OS / Reference details in your original format:").grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 5))
         row += 1
         self.paste = scrolledtext.ScrolledText(self.templates, height=7, wrap="word", font=("Consolas", 10))
@@ -152,6 +156,8 @@ class App(ttk.Frame):
                 ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", padx=(0, 6), pady=3)
                 ttk.Entry(frame, textvariable=self.values[role + "." + field]).grid(row=row, column=1, sticky="ew", pady=3)
         ttk.Label(self.comparison_tab, text="Template fields are shared with tab 1. Model, connection and path overrides come from tab 2.").pack(anchor="w", pady=(6, 4))
+        ttk.Checkbutton(self.comparison_tab, text="Check CSC features", variable=self.check_csc_features,
+                        command=self.invalidate).pack(anchor="w", pady=4)
         controls = ttk.Frame(self.comparison_tab)
         controls.pack(fill="x", pady=6)
         controls.columnconfigure(1, weight=1)
@@ -160,9 +166,9 @@ class App(ttk.Frame):
         ttk.Label(controls, text="Content source").grid(row=1, column=0, sticky="w", pady=6)
         ttk.Combobox(controls, textvariable=self.comparison_source, state="readonly", width=13,
                      values=("auto", "submitted", "shelved", "workspace")).grid(row=1, column=1, sticky="w", padx=8)
-        self.compare_button = ttk.Button(controls, text="Generate blank plan & compare", command=self.compare)
+        self.compare_button = ttk.Button(controls, text="Compare with Empty-file preview", command=self.compare)
         self.compare_button.grid(row=1, column=3, sticky="e", padx=8)
-        ttk.Label(self.comparison_tab, text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Compares combined developer edits with blank-file content.", wraplength=1000).pack(anchor="w", pady=(0, 4))
+        ttk.Label(self.comparison_tab, text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Uses tab 4 previews, including files that already match. If no current preview exists, generates it and displays it in tab 4.", wraplength=1000).pack(anchor="w", pady=(0, 4))
         ttk.Label(self.comparison_tab, text="Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.", wraplength=1000).pack(anchor="w", pady=(0, 4))
         ttk.Label(self.comparison_tab, textvariable=self.comparison_status, wraplength=1000).pack(anchor="w", pady=(0, 6))
         self.comparison_box = scrolledtext.ScrolledText(self.comparison_tab, wrap="none", font=("Consolas", 10), state="disabled")
@@ -176,11 +182,16 @@ class App(ttk.Frame):
         try:
             config = self.get_config()
             numbers, source = parse_changelists(self.changelist.get()), self.comparison_source.get()
+            preview_plan = copy.deepcopy(getattr(self, "preview_plan", None))
+            if getattr(self, "preview_input_hash", None) != digest(canonical(config)):
+                preview_plan = None
             captured = digest(canonical({"config": config, "numbers": numbers, "source": source}))
             def complete(report):
                 self.comparison_report = report
                 folder = BASE / "reports" / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-compare-" + report["changelists"][0]["number"])
                 output = save_comparison(report, folder)
+                self.show_previews(report["plan"])
+                self.preview_input_hash = digest(canonical(config))
                 self.comparison_box.configure(state="normal")
                 self.comparison_box.delete("1.0", "end")
                 for line in comparison_summary(report).splitlines(keepends=True):
@@ -197,8 +208,8 @@ class App(ttk.Frame):
                     self.invalidate_comparison()
                 self.status.set(f"Read-only changelist comparison saved to {output}")
             self.run(lambda: compare_changelist(P4CLI(config["perforce"], progress=self.progress), config,
-                                               numbers, source=source), complete,
-                     "Generating blank-file content and comparing edits from the selected changelists.")
+                                               numbers, source=source, preview_plan=preview_plan), complete,
+                     "Comparing tab 4 Empty-file preview content with edits from the selected changelists.")
         except Exception as exc:
             messagebox.showerror("Changelist comparison", str(exc))
 
@@ -213,12 +224,15 @@ class App(ttk.Frame):
                 value = config.get(key, "")
             variable.set(", ".join(value) if isinstance(value, list) else value)
         self.jdm.set(config.get("jdm", False))
+        self.check_csc_features.set(config.get("check_csc_features", False))
+        self.invalidate()
         self.overrides.delete("1.0", "end")
         self.overrides.insert("1.0", json.dumps(config.get("paths", {}), indent=2))
 
     def get_config(self, *, checked=True):
         result = copy.deepcopy(getattr(self, "extra_config", {}))
-        result.update({"perforce": {}, "current": {}, "reference": {}, "jdm": self.jdm.get()})
+        result.update({"perforce": {}, "current": {}, "reference": {}, "jdm": self.jdm.get(),
+                       "check_csc_features": self.check_csc_features.get()})
         for key, variable in self.values.items():
             value = variable.get().strip()
             if "." in key:
@@ -323,13 +337,18 @@ class App(ttk.Frame):
             tag = review_line_tag(line)
             self.summary_box.insert("end", line, tag if tag else ())
         self.summary_box.configure(state="disabled")
+        self.show_previews(plan)
+        self.preview_input_hash = self.input_hash
+        self.approved.set(False)
+        self.tabs.select(self.review)
+        self.status.set(f"Plan saved to {self.plan_path}. Review diffs; blocked items will remain manual work.")
+
+    def show_previews(self, plan):
+        self.preview_plan = copy.deepcopy(plan)
         self.preview_box.configure(state="normal")
         self.preview_box.delete("1.0", "end")
         self.preview_box.insert("1.0", preview_summary(plan))
         self.preview_box.configure(state="disabled")
-        self.approved.set(False)
-        self.tabs.select(self.review)
-        self.status.set(f"Plan saved to {self.plan_path}. Review diffs; blocked items will remain manual work.")
 
     def generate(self):
         try:

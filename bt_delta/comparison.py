@@ -10,8 +10,9 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-from .blank import BlankPlanner
-from .csc import model_root
+from .blank import BlankPlanner, plan_from_previews
+from .config import validate
+from .csc import CARRIER_FILENAME, model_root
 from .executor import supported_type, verify_workspace_path
 from .perforce import MappingError, PerforceError, PerforceTimeout, parse_view, _revision
 from .planner import decode, digest, save_plan
@@ -231,19 +232,34 @@ def _combine(deltas):
     return additions, removals
 
 
-def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
+def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, preview_plan=None):
     numbers = parse_changelists(numbers)
     if source not in ("auto", "submitted", "shelved", "workspace"):
         raise ValueError("Unsupported changelist content source")
     changes = [_load_developer(p4, number, source) for number in numbers]
-    plan = BlankPlanner(p4, config, catalog).build()
+    if preview_plan is not None:
+        supplied = validate(config)
+        for key, value in supplied.items():
+            if value not in (None, "", []) and value != preview_plan["config"].get(key):
+                raise ValueError("Tab 4 preview inputs differ from current inputs; regenerate the preview before comparing.")
+        source_plan = preview_plan
+    else:
+        source_plan = BlankPlanner(p4, config, catalog).build()
+    plan = plan_from_previews(source_plan)
     planned = {entry["path"]: entry for entry in plan["changes"]}
     developer, pending_reads = {}, []
     warnings = []
+    if not plan["config"]["check_csc_features"]:
+        warnings.append("CSC feature checks are disabled; " + CARRIER_FILENAME + " changelist entries are excluded.")
+    if not planned:
+        warnings.append("Tab 4 has no preview entries. The comparison baseline is unavailable; inspect the rule results below.")
     for order, change in enumerate(changes):
         if change["content_source"] == "shelved":
             warnings.append(f"CL {change['number']}: shelved edits are extracted against depot head; only shelved files are included.")
         for entry in change["files"]:
+            if not plan["config"]["check_csc_features"] and entry["path"].rsplit("/", 1)[-1] == CARRIER_FILENAME:
+                warnings.append(f"CL {change['number']}: CSC feature file skipped: {entry['path']}")
+                continue
             try:
                 delta = _read_delta(p4, change, entry)
                 if change["content_source"] != "submitted" and delta["exists_after"]:
@@ -265,7 +281,8 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
                 mapping_errors.append(f"{key}: {exc}")
     results = []
     try:
-        csc_root = model_root(plan["config"]["current"]["csc_path"], plan["config"]["model"]) + "/"
+        csc_path = plan["config"]["current"].get("csc_path", "")
+        csc_root = model_root(csc_path, plan["config"]["model"]) + "/" if plan["config"]["check_csc_features"] and csc_path else None
     except ValueError as exc:
         csc_root = None
         mapping_errors.append(str(exc))
@@ -287,8 +304,17 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
         item["outside_templates"] = not item["template_paths"]
         item["extra_file"] = bool(deltas and not wanted)
         item["errors"] = [f"CL {delta['changelist']}: {delta['error']}" for delta in deltas if delta["error"]]
+        if not planned:
+            item["extra_file"] = False
+            item["errors"].append("No tab-4 preview baseline is available; this file cannot be classified.")
         try:
-            expected = content_units(path, base64.b64decode(wanted["after"]), wanted["type"]) if wanted else []
+            expected, seen = [], set()
+            for snippet in wanted["preview_contents"] if wanted else []:
+                for unit in content_units(path, base64.b64decode(snippet["content"]), snippet["type"]):
+                    signature = _signature(unit)
+                    if signature not in seen:
+                        expected.append(unit)
+                        seen.add(signature)
             additions, removals = _combine([delta for delta in deltas if not delta["error"]])
             item["missing"] = _difference(expected, additions)
             item["extra"] = _difference(additions, expected)
@@ -322,21 +348,22 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
         content = local.read_bytes() if local is not None else p4.read_shelved_file(path, number)
         if digest(content) != expected_hash:
             raise PerforceError(f"CL {number} file content changed during comparison: {path}")
-    counts = {"changelists": len(changes), "blank_plan_files": len(planned), "developer_files": len(developer),
+    counts = {"changelists": len(changes), "blank_plan_files": len(planned),
+              "preview_rules": len({preview["rule"] for preview in plan["previews"]}), "developer_files": len(developer),
               "missing_from_changelists": sum(bool(item["missing"]) for item in results),
               "extra_files": sum(item["extra_file"] for item in results),
               "extra_changes": sum(bool(item["extra"]) for item in results),
               "matched_items": sum(len(item["matched"]) for item in results),
               "unreadable_files": sum(bool(item["errors"]) for item in results)}
     return {"schema_version": 2, "created_at": datetime.now(timezone.utc).isoformat(), "changelists": changes,
-            "comparison_basis": "Blank reference/checklist plan versus changes introduced by the selected changelists.",
+            "comparison_basis": "Tab 4 Empty-file preview versus changes introduced by the selected changelists.",
             "warnings": warnings + mapping_errors, "counts": counts, "files": results, "plan": plan,
-            "incomplete": bool(mapping_errors or counts["unreadable_files"] or any(check["status"] == "blocked" for check in plan["checks"]))}
+            "incomplete": bool(not planned or mapping_errors or counts["unreadable_files"] or any(check["status"] == "blocked" for check in plan["checks"]))}
 
 
 def comparison_summary(report):
-    lines = ["Blank plan versus developer changelists: " + ", ".join(change["number"] for change in report["changelists"]),
-             report["comparison_basis"], "Read-only. Current file content does not affect the blank plan.",
+    lines = ["Tab 4 Empty-file preview versus developer changelists: " + ", ".join(change["number"] for change in report["changelists"]),
+             report["comparison_basis"], "Read-only. Uses preview content, including previews for files requiring no edits.",
              "Statements, package names and feature values are compared within each filename and init/Make context.",
              "Counts: " + json.dumps(report["counts"]),
              "INCOMPLETE: inspect unreadable files and blocked blank-plan rules." if report["incomplete"] else "Comparison completed."]
@@ -362,7 +389,16 @@ def comparison_summary(report):
             for unit in item[field] if field else []:
                 origin = " [CL " + ", ".join(unit["changelists"]) + "]" if unit.get("changelists") else ""
                 lines.append(f"{unit.get('operation', 'expected').upper()}{origin}: {unit['text']}")
-    lines.extend(["", "=" * 80, "BLANK-PLAN RULE RESULTS"])
+    lines.extend(["", "=" * 80, "TAB 4 EMPTY-FILE PREVIEW BASELINE"])
+    if not report["plan"]["previews"]:
+        lines.append("No preview entries were generated. Inspect the rule results below.")
+    for preview in report["plan"]["previews"]:
+        lines.extend(["", f"Rule: {preview['rule']} — {preview['title']} ({preview['source']})",
+                      "Target: " + preview["target_path"]])
+        if preview.get("reference_path"):
+            lines.append("Reference: " + preview["reference_path"])
+        lines.append(preview["content"])
+    lines.extend(["", "=" * 80, "PREVIEW SOURCE RULE RESULTS"])
     for check in report["plan"]["checks"]:
         lines.extend([f"[{check['status'].upper()}] {check['rule']}: {check['message']}", *check["paths"]])
     lines.extend(["", "=" * 80, "BLANK CONTENT AND INDIVIDUAL CHANGELIST DIFFS"])

@@ -44,12 +44,16 @@ def parse_details(text: str) -> dict:
 def validate(config: dict) -> dict:
     config = json.loads(json.dumps(config))
     config.pop("cp_template", None)
+    config.setdefault("check_csc_features", False)
+    if not isinstance(config["check_csc_features"], bool):
+        raise ConfigError("check_csc_features must be true or false")
     for role in ("current", "reference"):
-        for field in ("system_template", "vendor_template", "csc_path"):
+        fields = ("system_template", "vendor_template", "csc_path") if config["check_csc_features"] else ("system_template", "vendor_template")
+        for field in fields:
             if not str(config.get(role, {}).get(field, "")).strip():
                 raise ConfigError(f"Missing {role}.{field}")
-        csc = config[role]["csc_path"].rstrip("/")
-        if not csc.startswith("//") or any(s in csc for s in ("..", "*", "#", "@", "\\")):
+        csc = config[role].get("csc_path", "").rstrip("/")
+        if csc and (not csc.startswith("//") or any(s in csc for s in ("..", "*", "#", "@", "\\"))):
             raise ConfigError(f"Invalid {role}.csc_path")
         config[role]["csc_path"] = csc
     for field in ("port", "user", "client"):

@@ -15,6 +15,7 @@ from bt_delta.comparison import compare_changelist, comparison_summary, content_
 from bt_delta.comparison import save_comparison
 from bt_delta.demo import DemoP4, fixture
 from bt_delta.executor import ApprovalError, execute
+from bt_delta.planner import Planner, preview_summary, seal
 
 
 class HistoryP4(DemoP4):
@@ -44,6 +45,7 @@ class ComparisonTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.p4, self.config = fixture(self.temp.name)
+        self.config["check_csc_features"] = True
         self.p4.__class__ = HistoryP4
         self.p4.history = {(path, row[0]): row[1] for path, row in self.p4.data.items()}
         self.p4.reads, self.p4.unreadable = [], set()
@@ -82,6 +84,29 @@ class ComparisonTests(unittest.TestCase):
     def file(self, report, path):
         return next(item for item in report['files'] if item['path'] == path)
 
+    def test_disabled_csc_comparison_skips_feature_diffs_but_checks_other_files(self):
+        carrier = self.wanted('csc.features')
+        self.submitted(carrier['path'], b'{"CarrierFeature_BT_EnableSAP":"TRUE"}')
+        self.p4.unreadable.add(carrier['path'])
+        board = self.wanted('system.board')
+        self.submitted(board['path'], base64.b64decode(board['after']))
+        self.config['check_csc_features'] = False
+        self.config['current'].pop('csc_path')
+        self.config['reference'].pop('csc_path')
+        report = self.report()
+        self.assertFalse(report['incomplete'])
+        self.assertNotIn(carrier['path'], {item['path'] for item in report['files']})
+        self.assertFalse(any('_CSC/' in path for path, revision in self.p4.reads))
+        self.assertTrue(self.file(report, board['path'])['matched'])
+        self.assertFalse(any(item['rule'] == 'csc.features' for item in report['plan']['previews']))
+        self.assertIn('CSC feature file skipped: ' + carrier['path'], comparison_summary(report))
+
+    def test_changing_csc_checkbox_rejects_previous_preview_baseline(self):
+        source_plan = Planner(self.p4, self.config).build()
+        self.config['check_csc_features'] = False
+        with self.assertRaisesRegex(ValueError, 'Tab 4 preview inputs differ'):
+            self.report(preview_plan=source_plan)
+
     def test_blank_plan_independent_of_current_content_and_reads_reference_only(self):
         for path, row in list(self.p4.data.items()):
             if 'COOSA' in path:
@@ -100,6 +125,62 @@ class ComparisonTests(unittest.TestCase):
         result = self.file(report, item['path'])
         self.assertTrue(any('BOARD_HAVE_BLUETOOTH' in unit['text'] for unit in result['matched']))
         self.assertIn(item['path'], [entry['path'] for entry in report['plan']['changes']])
+
+    def test_comparison_uses_displayed_tab4_previews_instead_of_changes_or_regenerating_rules(self):
+        source_plan = Planner(self.p4, self.config).build()
+        preview = next(item for item in source_plan['previews'] if item['rule'] == 'system.board')
+        path = preview['target_path']
+        # A displayed preview can contain expected content absent from both the
+        # reference's current head and the regular plan's proposed edits.
+        preview['content'] = 'TAB4_ONLY = yes\n'
+        preview['content_base64'] = base64.b64encode(preview['content'].encode()).decode()
+        source_plan['changes'] = []
+        source_plan = seal(source_plan)
+        self.submitted(path, self.p4.data[path][1] + b'TAB4_ONLY = yes\n')
+        with patch('bt_delta.comparison.BlankPlanner', side_effect=AssertionError('Must reuse tab 4')):
+            report = compare_changelist(self.p4, self.config, '100', preview_plan=source_plan)
+        item = self.file(report, path)
+        self.assertIn('system.board', item['rules'])
+        self.assertTrue(any('TAB4_ONLY = yes' in unit['text'] for unit in item['matched']))
+        self.assertFalse(item['missing'])
+        self.assertEqual(report['plan']['previews'], source_plan['previews'])
+        self.assertEqual(preview_summary(report['plan']), preview_summary(source_plan))
+        self.assertGreater(report['counts']['preview_rules'], 0)
+        self.assertIn('TAB 4 EMPTY-FILE PREVIEW BASELINE', comparison_summary(report))
+
+    def test_already_matching_file_keeps_tab4_rule_when_normal_plan_has_no_edit(self):
+        reference = next(path for path in self.p4.data if 'BENI' in path and '_sssi/' in path and path.endswith('BoardConfigCommon.mk'))
+        current = next(path for path in self.p4.data if 'COOSA' in path and '_sssi/' in path and path.endswith('BoardConfigCommon.mk'))
+        self.p4.data[current] = self.p4.data[reference]
+        self.p4.history[current, self.p4.data[current][0]] = self.p4.data[current][1]
+        source_plan = Planner(self.p4, self.config).build()
+        self.assertFalse(any(change['path'] == current for change in source_plan['changes']))
+        self.submitted(current, self.p4.data[current][1] + b'# developer comment\n')
+        report = compare_changelist(self.p4, self.config, '100', preview_plan=source_plan)
+        item = self.file(report, current)
+        self.assertIn('system.board', item['rules'])
+        self.assertFalse(item['extra_file'])
+        self.assertTrue(any('BOARD_HAVE_BLUETOOTH' in unit['text'] for unit in item['missing']))
+
+    def test_tab4_preview_from_other_inputs_is_rejected(self):
+        source_plan = Planner(self.p4, self.config).build()
+        other_config = copy.deepcopy(self.config)
+        other_config['reference']['csc_path'] += '/OTHER'
+        with self.assertRaisesRegex(ValueError, 'Tab 4 preview inputs differ'):
+            compare_changelist(self.p4, other_config, '100', preview_plan=source_plan)
+
+    def test_two_tab4_rules_for_same_file_preserve_both_rules_and_compare_once(self):
+        source_plan = Planner(self.p4, self.config).build()
+        previews = [item for item in source_plan['previews'] if item['rule'] in ('system.postfs', 'system.boot')]
+        path = previews[0]['target_path']
+        self.assertEqual({item['target_path'] for item in previews}, {path})
+        content = ''.join(item['content'] for item in previews).encode()
+        self.submitted(path, content)
+        report = compare_changelist(self.p4, self.config, '100', preview_plan=source_plan)
+        item = self.file(report, path)
+        self.assertEqual(set(item['rules']), {'system.postfs', 'system.boot'})
+        self.assertFalse(item['missing'])
+        self.assertTrue(item['matched'])
 
     def test_unchanged_statements_in_developer_file_do_not_satisfy_blank_plan(self):
         item = self.wanted('system.board')
@@ -251,12 +332,14 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(report['counts']['unreadable_files'], 1)
         self.assertTrue(self.file(report, path)['extra_file'])
 
-    def test_blocked_blank_rule_does_not_hide_extra_files(self):
+    def test_empty_preview_baseline_is_explicit_and_does_not_misclassify_files(self):
         self.config['chipset'] = 'unknown'
         self.submitted('//OTHER/a.txt', b'new\n')
         report = self.report()
         self.assertTrue(report['incomplete'])
-        self.assertEqual(report['counts']['extra_files'], 1)
+        self.assertEqual(report['counts']['extra_files'], 0)
+        self.assertTrue(self.file(report, '//OTHER/a.txt')['errors'])
+        self.assertIn('No preview entries were generated', comparison_summary(report))
 
     def test_pending_foreign_unshelved_workspace_is_rejected(self):
         self.p4.descriptions['100']['status'] = 'pending'

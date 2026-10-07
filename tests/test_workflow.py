@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from bt_delta.config import ConfigError, parse_details, validate
 from bt_delta.demo import fixture, demo_plan
@@ -22,6 +23,7 @@ class WorkflowTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.p4, self.config = fixture(self.root / "workspace")
+        self.config["check_csc_features"] = True
 
     def build(self):
         plan = Planner(self.p4, self.config).build()
@@ -31,6 +33,42 @@ class WorkflowTests(unittest.TestCase):
     def execute(self, plan, **kwargs):
         return execute(self.p4, plan, plan["digest"], acknowledge_reviews=True,
                        journal_path=self.root / "execution.json", **kwargs)
+
+    def test_csc_checks_default_off_without_discovery_reads_or_previews(self):
+        from bt_delta.blank import BlankPlanner
+        self.config.pop("check_csc_features")
+        for role in ("current", "reference"):
+            self.config[role].pop("csc_path")
+        original_files, original_read = self.p4.files, self.p4.read_file
+
+        def files(path):
+            self.assertNotIn("_CSC/", path)
+            return original_files(path)
+
+        def read(path, revision=None):
+            self.assertNotIn("_CSC/", path)
+            return original_read(path, revision)
+
+        with patch.object(self.p4, "files", side_effect=files), patch.object(self.p4, "read_file", side_effect=read):
+            for builder in (Planner, BlankPlanner):
+                plan = builder(self.p4, self.config).build()
+                self.assertFalse(plan["config"]["check_csc_features"])
+                self.assertFalse(any("csc.features" in item["rules"] for item in plan["changes"]))
+                self.assertFalse(any(item["rule"] == "csc.features" for item in plan["previews"]))
+                check = next(item for item in plan["checks"] if item["rule"] == "csc.features")
+                self.assertEqual("skipped", check["status"])
+                self.assertIn("disabled", check["message"])
+                self.assertFalse(any(item["status"] == "blocked" for item in plan["checks"]))
+
+    def test_csc_option_requires_boolean_and_paths_only_when_enabled(self):
+        for value in ("false", "true", 0, 1, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, "check_csc_features must be"):
+                validate({**self.config, "check_csc_features": value})
+        self.config["current"].pop("csc_path")
+        with self.assertRaisesRegex(ConfigError, "Missing current.csc_path"):
+            validate(self.config)
+        self.config["check_csc_features"] = False
+        self.assertFalse(validate(self.config)["check_csc_features"])
 
     def test_user_pasted_input_format(self):
         data = parse_details("C OS:\nSystem Template - CUR_SYS\nVendor template - CUR_VENDOR\nCSC path - //COOSA_CSC/a/\n\nReference 8.5 details\nSystem Template - REF_SYS\nVendor template - REF_VENDOR\nCSC path - //BENI_CSC/a/\nCP template : CP")
@@ -178,7 +216,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("Folder m36xxx", check["message"])
         preview = next(p for p in plan["previews"] if p["rule"] == "vendor.hcf")
         self.assertIn("$(HCF_PATH)/m36xxx", preview["content"])
-        self.assertIn("bt.hcf", preview["content"])
+        self.assertIn("bt.hcf", preview["note"])
 
     def test_hidl_check_accepts_newer_version(self):
         manifest = next(path for path in self.p4.data

@@ -161,6 +161,9 @@ class Planner:
 
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
         """Record inspection-only content; it is never passed to the executor."""
+        raw_content = content if isinstance(content, bytes) else content.encode("utf-8")
+        reference_snapshot = self.snapshots.get(reference_path, {})
+        file_type = reference_snapshot.get("type", "text") if isinstance(content, bytes) else "text"
         if isinstance(content, bytes):
             try:
                 content, _ = decode(content)
@@ -169,7 +172,8 @@ class Planner:
         self.previews.append({"rule": rule["id"], "title": rule["title"],
                               "source": rule["source"], "target_path": target_path,
                               "reference_path": reference_path, "note": note,
-                              "content": content})
+                              "content": content, "content_base64": base64.b64encode(raw_content).decode("ascii"),
+                              "file_type": file_type})
 
     def result(self, rule, status, message, paths=None):
         self.results.append({"rule": rule["id"], "title": rule["title"], "source": rule["source"],
@@ -316,6 +320,9 @@ class Planner:
             self.result(rule, "manual", rule["notes"])
             return
         if kind == "carrier_features":
+            if not self.config["check_csc_features"]:
+                self.result(rule, "skipped", "CSC feature checks are disabled. Select Check CSC features to include them.")
+                return
             return self.carrier_features(rule)
         if kind in ("copy_if_reference", "copy_tree_if_reference"):
             source = self.resolver.discover("reference", scope, target, optional=True)
@@ -443,7 +450,8 @@ class Planner:
                 current_root = ET.fromstring(text)
                 current = {e.tag: e.text for e in current_root.iter() if selected(e.tag)}
                 after = transform(text, {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else text
-                empty_preview = "\n".join(f"<{key}>{value}</{key}>" for key, value in values.items()) + ("\n" if values else "")
+                empty_preview = transform(f"<{current_root.tag}></{current_root.tag}>\n",
+                                          {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else ""
             if not values:
                 self.result(rule, "review", "Reference has no matching Bluetooth feature values; inspect feature selection.", [src, path])
                 return
@@ -508,11 +516,11 @@ class Planner:
             raise ValueError(f"No .hcf file found in chipset/model folder {self.config['chipset']}/{variant}")
         for path in hcf:
             self.snapshot(path)
-        evidence = (selected["text"] + "\n\nResolved HCF folder: " + variant +
-                    "\nTARGET_PRODUCT values: " + " ".join(selected["products"]) +
-                    "\nHCF files:\n" + "\n".join(hcf) + "\n")
-        self.preview(rule, current_mk, evidence, reference_path=reference_mk,
-                     note="Reference bluetooth.mk filter block that current must contain, plus the exact current HCF files found.")
+        evidence = ("Resolved HCF folder: " + variant +
+                    "; TARGET_PRODUCT values: " + " ".join(selected["products"]) +
+                    ". Verified HCF files: " + ", ".join(hcf))
+        self.preview(rule, current_mk, selected["text"] + "\n", reference_path=reference_mk,
+                     note="Reference bluetooth.mk filter block that current must contain. " + evidence)
         self.result(rule, "change" if filter_changed else "pass",
                     ("Reference HCF filter block will be added/updated. " if filter_changed else "Reference HCF filter block already matches. ") +
                     f"Folder {variant} contains {len(hcf)} .hcf file(s); products: " +

@@ -20,6 +20,7 @@
   "ap": "",
   "hcf_variant": "",
   "products": [],
+  "check_csc_features": false,
   "jdm": false,
   "firmware_sha256": "",
   "paths": {}
