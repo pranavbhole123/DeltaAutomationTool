@@ -400,6 +400,32 @@ class WorkflowTests(unittest.TestCase):
             skipped = next(check for check in plan["checks"] if check["rule"] == "csc.features" and check["status"] == "skipped")
             self.assertIn(path, skipped["paths"])
 
+    def test_kyc_binary_is_found_and_reported_in_live_log_and_saved_report(self):
+        from bt_delta.blank import BlankPlanner
+        from bt_delta.planner import summary
+        reference_root = "//Beni_csc/strawberry/exynos/m36x"
+        self.config["reference"]["csc_path"] = reference_root
+        self.config["current"]["csc_path"] = "//Coosa_csc/strawberry/exynos/m36x"
+        path = reference_root + "/omc/kyc/kyc/system/customer_carrier_feature.json"
+        self.p4.data[path] = (1, b'\x00\xffbinary', 'binary')
+        messages = []
+        self.p4.progress = messages.append
+        original_read = self.p4.read_file
+        def never_read_binary(file, revision=None):
+            self.assertNotEqual(file, path, "The binary must only be discovered, never read")
+            return original_read(file, revision)
+        self.p4.read_file = never_read_binary
+        for planner in (Planner, BlankPlanner):
+            messages.clear()
+            plan = planner(self.p4, self.config).build()
+            self.assertFalse(any(check["status"] == "blocked" for check in plan["checks"]))
+            self.assertFalse(any("csc.features" in item["rules"] for item in plan["changes"]))
+            self.assertTrue(any(f"CSC file found and skipped: {path} (binary)" in message for message in messages))
+            rendered = summary(plan)
+            self.assertIn(path, rendered)
+            self.assertIn("customer_carrier_feature.json (binary)", rendered)
+            self.assertIn("No customer_carrier_feature_plan.json", rendered)
+
     def test_every_collection_and_region_uses_the_same_relative_feature_path(self):
         current_root = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
         reference_root = "//BENI_CSC/Strawberry/EXYNOS/m36x"

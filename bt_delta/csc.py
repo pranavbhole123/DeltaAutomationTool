@@ -43,9 +43,19 @@ def carrier_files(p4, root, *, details=None):
                    "filename": CARRIER_FILENAME, "skipped_directories": skipped}
     if details is not None:
         details.update(information)
-    logging.getLogger(__name__).info("CSC discovery: %s; %d files returned, %d matched %s; examples: %s",
-                                    query, len(records), len(result), CARRIER_FILENAME,
-                                    ", ".join(sorted(result.values())[:5]))
+    def report(message):
+        logging.getLogger(__name__).info(message)
+        progress = getattr(p4, "progress", None)
+        if progress:
+            progress(message)
+
+    report(f"CSC discovery: {query}; {len(records)} files found; "
+           f"{len(result)} named exactly {CARRIER_FILENAME}.")
+    for directory in skipped:
+        report(f"CSC directory skipped: {directory['path']}; {CARRIER_FILENAME} is absent.")
+        for file in directory["files"]:
+            report(f"CSC file found and skipped: {file['path']} ({file['type']}); "
+                   f"only {CARRIER_FILENAME} is eligible.")
     return dict(sorted(result.items()))
 
 
@@ -55,7 +65,7 @@ def missing_carrier_message(details):
         return (f"Perforce returned no files for {query}. Check the exact depot/directory casing "
                 "and that the configured Perforce server contains this path.")
     return (f"Perforce returned {details['returned_files']} files for {query}, but none matched "
-            f"the exact filename {CARRIER_FILENAME}. Directories were left untouched; "
+            f"the exact filename {CARRIER_FILENAME}. Other files were found and skipped. Directories were left untouched; "
             "their file paths and types are listed in the skipped-directory checks.")
 
 
