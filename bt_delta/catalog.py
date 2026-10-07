@@ -4,7 +4,7 @@ Source: checklist/source_slsi.tsv. Sample a35x/branch/chip values are not defaul
 Add a rule here or supply a JSON catalog with the same schema to extend the tool.
 """
 from __future__ import annotations
-from .csc import CARRIER_FILE_PATTERNS
+from .csc import CARRIER_FILENAME
 
 CHIPSETS = {"s5e8535": "rice_s620", "s5e8835": "quartz_s621p",
             "s5e8825": "papaya_s620", "s5e8845": "rose_s621p"}
@@ -70,8 +70,8 @@ def default_catalog():
                        "reference_package_patterns": [BT_PACKAGE_PATTERN]}]),
         rule("system.features", "Compare system Bluetooth product features with reference", "B10:C10", "system", "sec_product", "reference_features",
              prefix="SEC_PRODUCT_FEATURE_BLUETOOTH_", key_patterns=[BT_NAME_PATTERN], format="make"),
-        rule("csc.features", "Add missing carrier-feature JSON files and keys across all regions", "C10", "csc", "carrier_features", "carrier_features",
-             file_patterns=CARRIER_FILE_PATTERNS),
+        rule("csc.features", "Add missing customer_carrier_feature_plan.json files and keys across all regions", "C10", "csc", "carrier_features", "carrier_features",
+             filename=CARRIER_FILENAME),
         rule("system.postfs", "System post-fs-data Bluetooth permissions", "B12", "system", "root_init", "transform",
              actions=[{"type": "init_commands", "event": "on post-fs-data", "commands": POST_FS,
                        "reference_command_patterns": [BT_INIT_PATTERN], "reference_comment_patterns": [BT_COMMENT_PATTERN]}]),

@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from .perforce import PerforceTimeout
-from .csc import carrier_files, carrier_json, missing_carrier_message, model_root
+from .csc import carrier_files, carrier_json, model_root
 from .planner import (Planner, canonical, decode, digest, make_values, name_selector,
                       seal, select_hcf_block, substitute)
 from .reference import augment_actions_from_reference, copy_make_settings
@@ -148,9 +148,8 @@ class BlankPlanner(Planner):
         root = model_root(self.config["reference"]["csc_path"], self.config["model"])
         current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
         discovery = {}
-        reference = carrier_files(self.p4, root, rule, details=discovery)
-        if not reference:
-            self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
+        reference = carrier_files(self.p4, root, details=discovery)
+        self.report_carrier_discovery(rule, discovery)
         for relative, src in reference.items():
             path = current_root + "/" + relative
             self.rule_paths.append(path)

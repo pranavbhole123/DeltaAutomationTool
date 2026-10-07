@@ -93,14 +93,12 @@
     },
     {
       "id": "csc.features",
-      "title": "Add missing carrier-feature JSON files and keys across all regions",
+      "title": "Add missing customer_carrier_feature_plan.json files and keys across all regions",
       "source": "SLSI!C10",
       "scope": "csc",
       "target": "carrier_features",
       "kind": "carrier_features",
-      "file_patterns": [
-        "*carrier_feature*.json"
-      ]
+      "filename": "customer_carrier_feature_plan.json"
     },
     {
       "id": "system.postfs",

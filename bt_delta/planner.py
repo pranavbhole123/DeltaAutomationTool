@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .catalog import default_catalog
-from .csc import add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
+from .csc import CARRIER_FILENAME, add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
 from .config import validate
 from .resolver import Resolver, relative_for
 from .transforms import TransformError, transform
@@ -518,14 +518,22 @@ class Planner:
                     f"Folder {variant} contains {len(hcf)} .hcf file(s); products: " +
                     ", ".join(self.config["products"]), [reference_mk, current_mk, *hcf])
 
+    def report_carrier_discovery(self, rule, discovery):
+        if not discovery["matched_files"]:
+            self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
+        for directory in discovery["skipped_directories"]:
+            files = directory["files"]
+            self.result(rule, "skipped", f"No {CARRIER_FILENAME} in this reference directory; left untouched. "
+                        "Files found: " + ", ".join(f"{file['filename']} ({file['type']})" for file in files),
+                        [directory["path"], *[file["path"] for file in files]])
+
     def carrier_features(self, rule):
         current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
         reference_root = model_root(self.config["reference"]["csc_path"], self.config["model"])
-        current = carrier_files(self.p4, current_root, rule)
+        current = carrier_files(self.p4, current_root)
         discovery = {}
-        reference = carrier_files(self.p4, reference_root, rule, details=discovery)
-        if not reference:
-            self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
+        reference = carrier_files(self.p4, reference_root, details=discovery)
+        self.report_carrier_discovery(rule, discovery)
         for relative, src in reference.items():
             dst = current_root + "/" + relative
             self.rule_paths.append(dst)
