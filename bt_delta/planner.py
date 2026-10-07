@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .catalog import default_catalog
-from .csc import add_missing_features, carrier_files, carrier_json, model_root
+from .csc import add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
 from .config import validate
 from .resolver import Resolver, relative_for
 from .transforms import TransformError, transform
@@ -522,9 +522,10 @@ class Planner:
         current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
         reference_root = model_root(self.config["reference"]["csc_path"], self.config["model"])
         current = carrier_files(self.p4, current_root, rule)
-        reference = carrier_files(self.p4, reference_root, rule)
+        discovery = {}
+        reference = carrier_files(self.p4, reference_root, rule, details=discovery)
         if not reference:
-            self.result(rule, "review", "No reference carrier_ JSON files found under " + reference_root)
+            self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
         for relative, src in reference.items():
             dst = current_root + "/" + relative
             self.rule_paths.append(dst)

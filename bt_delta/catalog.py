@@ -70,7 +70,7 @@ def default_catalog():
                        "reference_package_patterns": [BT_PACKAGE_PATTERN]}]),
         rule("system.features", "Compare system Bluetooth product features with reference", "B10:C10", "system", "sec_product", "reference_features",
              prefix="SEC_PRODUCT_FEATURE_BLUETOOTH_", key_patterns=[BT_NAME_PATTERN], format="make"),
-        rule("csc.features", "Add missing custom_carrier_feature_plan.json files and keys across all regions", "C10", "csc", "carrier_features", "carrier_features",
+        rule("csc.features", "Add missing carrier-feature JSON files and keys across all regions", "C10", "csc", "carrier_features", "carrier_features",
              file_patterns=CARRIER_FILE_PATTERNS),
         rule("system.postfs", "System post-fs-data Bluetooth permissions", "B12", "system", "root_init", "transform",
              actions=[{"type": "init_commands", "event": "on post-fs-data", "commands": POST_FS,

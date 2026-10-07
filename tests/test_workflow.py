@@ -324,9 +324,8 @@ class WorkflowTests(unittest.TestCase):
     def test_carrier_discovery_ignores_other_filenames_in_normal_and_blank_plans(self):
         from bt_delta.blank import BlankPlanner
         root = "//BENI_CSC/m36x/OTHER/REGION/system/"
-        ignored = ("customer_carrier_feature_plain.json", "customer_carrier_feature_plan.json",
-                   "custom_carrier_feature_plain.json", "custom_carrier_feature_plan.josn",
-                   "carrier_settings.json")
+        ignored = ("custom_carrier_feature_plan.josn", "carrier_settings.json",
+                   "custom_carrier_feature_plan.json.bak", "notes.json")
         for filename in ignored:
             # Invalid content catches accidental discovery and attempted parsing.
             self.p4.data[root + filename] = (1, b"not JSON", "text")
@@ -336,6 +335,47 @@ class WorkflowTests(unittest.TestCase):
             self.assertTrue(all(path.endswith("/custom_carrier_feature_plan.json") for path in paths))
             self.assertFalse(any(filename in path for path in paths for filename in ignored))
 
+    def test_logged_customer_filename_and_requested_custom_filename_are_both_discovered(self):
+        from bt_delta.blank import BlankPlanner
+        self.config["reference"]["csc_path"] = "//BENI_CSC/Strawberry/EXYNOS/m36x"
+        self.config["current"]["csc_path"] = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
+        relative = "OMC/ODM/INS/system/customer_carrier_feature_plain.json"
+        src = self.config["reference"]["csc_path"] + "/" + relative
+        dst = self.config["current"]["csc_path"] + "/" + relative
+        self.p4.data[src] = (7, b'{"Existing":false,"Missing":true}', "text")
+        self.p4.data[dst] = (4, b'{"Existing":true,"CurrentOnly":1}', "text")
+        second = "OTHER/XSG/custom_carrier_feature_plan.json"
+        self.p4.data[self.config["reference"]["csc_path"] + "/" + second] = (1, b'{"Feature":true}', "text")
+        plan = self.build()
+        changes = {change["path"]: change for change in plan["changes"]}
+        self.assertEqual(json.loads(base64.b64decode(changes[dst]["after"])),
+                         {"Existing":True,"CurrentOnly":1,"Missing":True})
+        self.assertIsNone(changes[self.config["current"]["csc_path"] + "/" + second]["revision"])
+        blank = BlankPlanner(self.p4, self.config).build()
+        self.assertFalse(any(check["status"] == "blocked" for check in blank["checks"]))
+        self.assertEqual({change["path"] for change in blank["changes"] if "csc.features" in change["rules"]},
+                         {dst, self.config["current"]["csc_path"] + "/" + second})
+
+    def test_empty_carrier_discovery_reports_path_and_filter_failures_separately(self):
+        from bt_delta.blank import BlankPlanner
+        reference_root = "//BENI_CSC/m36x"
+        for path in list(self.p4.data):
+            if path.startswith(reference_root + "/"):
+                del self.p4.data[path]
+        for planner in (Planner, BlankPlanner):
+            plan = planner(self.p4, self.config).build()
+            check = next(check for check in plan["checks"] if check["rule"] == "csc.features" and check["status"] == "review")
+            self.assertIn("Perforce returned no files for " + reference_root + "/...", check["message"])
+            self.assertIn("casing", check["message"])
+        path = reference_root + "/OMC/ODM/INS/system/carrier_settings.json"
+        self.p4.data[path] = (1, b'{}', "text")
+        for planner in (Planner, BlankPlanner):
+            plan = planner(self.p4, self.config).build()
+            check = next(check for check in plan["checks"] if check["rule"] == "csc.features" and check["status"] == "review")
+            self.assertIn("returned 1 files", check["message"])
+            self.assertIn("none matched *carrier_feature*.json", check["message"])
+            self.assertIn(path, check["message"])
+
     def test_every_collection_and_region_uses_the_same_relative_feature_path(self):
         current_root = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
         reference_root = "//BENI_CSC/Strawberry/EXYNOS/m36x"
@@ -343,9 +383,9 @@ class WorkflowTests(unittest.TestCase):
         # start at the model and use the source's full model-relative path.
         self.config["current"]["csc_path"] = current_root + "/OMC/ODM/INS"
         self.config["reference"]["csc_path"] = reference_root + "/OMC/OXM/INS"
-        files = {"OMC/OXM/INS/system/custom_carrier_feature_plan.json": b'{"AllFeatures": "INS"}',
+        files = {"OMC/OXM/INS/system/customer_carrier_feature_plain.json": b'{"AllFeatures": "INS"}',
                  "OMC/OXM/XSG/system/custom_carrier_feature_plan.json": b'{"AllFeatures": "XSG"}',
-                 "OTHER/COLLECTION/ATT/custom/custom_carrier_feature_plan.json": b'{"AllFeatures": "ATT"}',
+                 "OTHER/COLLECTION/ATT/custom/carrier_feature_plain.json": b'{"AllFeatures": "ATT"}',
                  "anything/region/custom_carrier_feature_plan.json": b'{"AllFeatures": "CUSTOM"}',
                  "custom_carrier_feature_plan.json": b'{"RootFeature": true}'}
         for relative, content in files.items():

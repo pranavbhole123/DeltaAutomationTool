@@ -8,7 +8,7 @@ Source: the corrected full SLSI text supplied by the user, preserved as `checkli
 | B6:C6 | system.board | Copy selected WLAN/BT assignments and board include from reference system BoardConfig; no static values |
 | B8 | system.packages | BluetoothAgent |
 | B10:C10 | system.features | Reference Bluetooth product flags; preserve current-only flags for review |
-| C10 | csc.features | Find custom_carrier_feature_plan.json files across the entire model; add missing files/keys at identical relative paths and preserve existing values (user-requested scope) |
+| C10 | csc.features | Find carrier-feature JSON files (custom/customer and plan/plain names) across the entire model; add missing files/keys at identical relative paths and preserve existing values (user-requested scope) |
 | B12 | system.postfs | Commands in on post-fs-data |
 | B13:B14 | system.boot | Boot logging, UART, BD address, EFS and dump permissions |
 | B18 | vendor.bluetooth | Copy only missing reference Bluetooth files |

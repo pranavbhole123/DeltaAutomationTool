@@ -218,7 +218,7 @@ class ComparisonTests(unittest.TestCase):
     def test_carrier_comparison_covers_regions_outside_the_pasted_region_path(self):
         current_root = '//COOSA_CSC/m36x'
         reference_root = '//BENI_CSC/m36x'
-        relative = 'OTHER/NEW_REGION/custom/custom_carrier_feature_plan.json'
+        relative = 'OTHER/NEW_REGION/custom/customer_carrier_feature_plain.json'
         content = b'{"MissingFeature":true}\n'
         self.p4.data[reference_root + '/' + relative] = (1, content, 'text')
         self.p4.history[reference_root + '/' + relative, 1] = content
