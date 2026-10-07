@@ -4,11 +4,11 @@ from __future__ import annotations
 import base64
 import copy
 import difflib
-import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from .perforce import PerforceTimeout
+from .csc import carrier_files, carrier_json, model_root
 from .planner import (Planner, canonical, decode, digest, make_values, name_selector,
                       seal, select_hcf_block, substitute)
 from .reference import augment_actions_from_reference, copy_make_settings
@@ -125,7 +125,7 @@ class BlankPlanner(Planner):
                 elements = [element for element in root.iter() if selected(element.tag)]
                 values = {element.tag: element.text or "" for element in elements}
                 if len(values) != len(elements) or any(len(element) for element in elements):
-                    raise ValueError("Duplicate/non-leaf reference floating feature elements")
+                    raise ValueError("Duplicate/non-leaf reference feature XML elements")
                 after = transform(current_blank or f"<{root.tag}></{root.tag}>\n",
                                   {"type": "xml_elements", "elements": values, "parent": root.tag})
             if not values:
@@ -145,39 +145,16 @@ class BlankPlanner(Planner):
         self.write_blank(path, after, rule, reference_path=src)
 
     def blank_carrier(self, rule):
-        root = self.config["reference"]["csc_path"].rstrip("/")
-        selected = name_selector(rule.get("prefix", "CarrierFeature_BT_"), rule.get("key_patterns", []))
-        records = self.p4.files(root + "/.../customer_carrier_feature_plain.json")
-        if not records:
-            self.result(rule, "review", "No reference regional carrier JSON files.")
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError(f"Duplicate reference JSON key: {key}")
-                result[key] = value
-            return result
-        def keep(value):
-            if isinstance(value, dict):
-                output = {}
-                for key, child in value.items():
-                    if selected(key):
-                        output[key] = child
-                    elif isinstance(child, dict):
-                        nested = keep(child)
-                        if nested:
-                            output[key] = nested
-                    elif isinstance(child, list) and any(keep(item) for item in child):
-                        raise ValueError("Carrier features inside arrays need explicit keyed mapping")
-                return output
-            return {}
-        for record in records:
-            src = record["depotFile"]
-            path = self.config["current"]["csc_path"].rstrip("/") + src[len(root):]
+        root = model_root(self.config["reference"]["csc_path"], self.config["model"])
+        current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
+        reference = carrier_files(self.p4, root, rule)
+        if not reference:
+            self.result(rule, "review", "No reference carrier_ JSON files found under " + root)
+        for relative, src in reference.items():
+            path = current_root + "/" + relative
             self.rule_paths.append(path)
-            reference, _ = decode(self.content(src))
-            values = keep(json.loads(reference, object_pairs_hook=unique))
-            if values:
-                self.write_blank(path, json.dumps(values, indent=2, ensure_ascii=False) + "\n", rule, reference_path=src)
-            else:
-                self.result(rule, "skipped", "No selected carrier features in this reference region.", [src, path])
+            source = self.snapshot(src)
+            content = base64.b64decode(source["content"])
+            carrier_json(decode(content)[0])
+            self.write_blank(path, content, rule,
+                             file_type=source["type"], reference_path=src)

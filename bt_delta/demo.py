@@ -105,7 +105,6 @@ def fixture(root):
             put(model_root + "/device/m36x_common/device_common.mk", "# Existing model packages\nPRODUCT_PACKAGES += ExistingPackage\n")
             put(model_root + "/device/m36x_common/init.m36x.rc", "on init\n    mkdir /unrelated 0755 root root\n\non post-fs-data\n    mkdir /data/keep 0755 system system\n")
             put(model_root + "/vendor/m36x_common/SecProductFeature.common", "UNRELATED_FEATURE=KEEP\nSEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD=" + ("TRUE\n" if role == "reference" else "FALSE\n"))
-            put(model_root + "/vendor/m36x_common/floating_feature.xml", "<SecFloatingFeatureSet><SEC_FLOATING_FEATURE_BLUETOOTH_DEMO>" + ("TRUE" if role == "reference" else "FALSE") + "</SEC_FLOATING_FEATURE_BLUETOOTH_DEMO></SecFloatingFeatureSet>\n")
             put(system_android + "/system/core/rootdir/init.rc", "on post-fs-data\n    mkdir /data/keep 0755 system system\n\non boot\n    setprop unrelated.keep yes\n")
             if role == "reference":
                 put(model_root + "/device/m36x_common/Bluetooth/bdroid_buildcfg.h", "#pragma once\n// Synthetic reference header\n")

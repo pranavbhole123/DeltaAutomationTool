@@ -7,8 +7,8 @@ Source: the corrected full SLSI text supplied by the user, preserved as `checkli
 | B4 | system.header | Copy reference bdroid header only if target is absent |
 | B6:C6 | system.board | Copy selected WLAN/BT assignments and board include from reference system BoardConfig; no static values |
 | B8 | system.packages | BluetoothAgent |
-| B10:C10 | system.features, system.floating | Reference Bluetooth product/floating flags; preserve current-only flags for review |
-| C10 | csc.features | Match same CSC region path and compare CarrierFeature_BT_ keys |
+| B10:C10 | system.features | Reference Bluetooth product flags; preserve current-only flags for review |
+| C10 | csc.features | Find carrier_ JSON filenames across the entire model; add missing files/keys at identical relative paths and preserve existing values (user-requested scope) |
 | B12 | system.postfs | Commands in on post-fs-data |
 | B13:B14 | system.boot | Boot logging, UART, BD address, EFS and dump permissions |
 | B18 | vendor.bluetooth | Copy only missing reference Bluetooth files |
@@ -22,4 +22,4 @@ Source: the corrected full SLSI text supplied by the user, preserved as `checkli
 | B34:C34 | vendor.firmware | Four sheet-defined chipset/firmware mappings; revision/hash/release review |
 | B36 | device.validation | Post-build phone address and *#2663# checks |
 
-The separate Feature Flags tab remains a manual eligibility reference until its contents are supplied. The implemented SLSI instruction to refer to the previous OS is used for concrete product/floating values. No old ANT, obsolete firmware aliases or old CSV checklist rules are imported.
+The separate Feature Flags tab remains a manual eligibility reference until its contents are supplied. The implemented SLSI instruction to refer to the previous OS is used for concrete product values. No old ANT, obsolete firmware aliases or old CSV checklist rules are imported.

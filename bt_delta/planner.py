@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .catalog import default_catalog
+from .csc import add_missing_features, carrier_files, carrier_json, model_root
 from .config import validate
 from .resolver import Resolver, relative_for
 from .transforms import TransformError, transform
@@ -302,7 +303,7 @@ class Planner:
                     break
         self.result({"id": "sheet.review", "title": "Review checklist interpretation", "source": "SLSI!B13,B24,B28,C10"},
                     "review", "Sheet literally uses 'chown bluetooth bluetooth ro.bt.bdaddr_path'. Review that entry. "
-                    "B28 omits the event; post-fs-data is inferred from B12. Product/floating features follow the reference OS; "
+                    "B28 omits the event; post-fs-data is inferred from B12. Product features follow the reference OS; "
                     "review model and regional eligibility against the Feature Flags tab before approving. "
                     "Sample TRUE/FALSE feature values are not forced across models.")
         plan.update(config=self.config, templates=self.resolver.specs, checks=self.results,
@@ -438,7 +439,7 @@ class Planner:
                 elements = [e for e in root.iter() if selected(e.tag)]
                 values = {e.tag: e.text or "" for e in elements}
                 if len(values) != len(elements) or any(len(e) for e in elements):
-                    raise ValueError("Duplicate/non-leaf reference floating feature elements")
+                    raise ValueError("Duplicate/non-leaf reference feature XML elements")
                 current_root = ET.fromstring(text)
                 current = {e.tag: e.text for e in current_root.iter() if selected(e.tag)}
                 after = transform(text, {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else text
@@ -518,77 +519,38 @@ class Planner:
                     ", ".join(self.config["products"]), [reference_mk, current_mk, *hcf])
 
     def carrier_features(self, rule):
-        current_root = self.config["current"]["csc_path"]
-        reference_root = self.config["reference"]["csc_path"]
-        selected_key = name_selector(rule.get("prefix", "CarrierFeature_BT_"), rule.get("key_patterns", []))
-        def listing(root):
-            records = self.p4.files(root + "/.../customer_carrier_feature_plain.json")
-            return {r["depotFile"][len(root) + 1:]: r["depotFile"] for r in records}
-        current, reference = listing(current_root), listing(reference_root)
-        if not current and not reference:
-            self.result(rule, "review", "No carrier feature JSON found under either supplied CSC path.")
-            return
-        for relative in sorted(set(current) | set(reference)):
-            if relative not in current or relative not in reference:
-                self.result(rule, "review", f"No same-region counterpart for {relative}; no cross-region copy.")
-                continue
-            src, dst = reference[relative], current[relative]
+        current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
+        reference_root = model_root(self.config["reference"]["csc_path"], self.config["model"])
+        current = carrier_files(self.p4, current_root, rule)
+        reference = carrier_files(self.p4, reference_root, rule)
+        if not reference:
+            self.result(rule, "review", "No reference carrier_ JSON files found under " + reference_root)
+        for relative, src in reference.items():
+            dst = current_root + "/" + relative
             self.rule_paths.append(dst)
-            source_text, _ = decode(base64.b64decode(self.snapshot(src)["content"]))
-            target_text, encoding = decode(self.content(dst))
-            def no_duplicates(pairs):
-                d = {}
-                for k, v in pairs:
-                    if k in d:
-                        raise ValueError(f"Duplicate JSON key: {k}")
-                    d[k] = v
-                return d
-            source = json.loads(source_text, object_pairs_hook=no_duplicates)
-            bt_values = []
-            def collect_bt(value, trail=""):
-                if isinstance(value, dict):
-                    for key, child in value.items():
-                        here = f"{trail}/{key}" if trail else key
-                        if selected_key(key):
-                            bt_values.append(f"{here} = {json.dumps(child, ensure_ascii=False)}")
-                        elif isinstance(child, (dict, list)):
-                            collect_bt(child, here)
-                elif isinstance(value, list):
-                    for index, child in enumerate(value):
-                        collect_bt(child, f"{trail}[{index}]")
-            collect_bt(source)
-            self.preview(rule, dst, "\n".join(bt_values) + ("\n" if bt_values else ""),
-                         reference_path=src,
-                         note="Bluetooth carrier values and their JSON locations found in this same-region reference file.")
-            target = json.loads(target_text, object_pairs_hook=no_duplicates)
-            changes = []
-            def visit(a, b, trail=""):
-                if isinstance(a, dict) and isinstance(b, dict):
-                    for key, value in a.items():
-                        if selected_key(key):
-                            if b.get(key) != value:
-                                b[key] = value
-                                changes.append(trail + key)
-                        elif isinstance(value, (dict, list)):
-                            if key not in b:
-                                raise ValueError(f"Missing JSON structure at {trail + key}; no automatic structural copy")
-                            visit(value, b[key], trail + key + "/")
-                elif isinstance(a, list) and isinstance(b, list):
-                    def has_bt(value):
-                        if isinstance(value, dict):
-                            return any(selected_key(k) or has_bt(v) for k, v in value.items())
-                        return isinstance(value, list) and any(has_bt(v) for v in value)
-                    if has_bt(a) or has_bt(b):
-                        raise ValueError("BT features inside JSON arrays require explicit keyed mapping; positions may differ")
-                elif isinstance(a, (dict, list)):
-                    raise ValueError("Regional JSON structures differ")
-            visit(source, target)
-            if changes:
-                # Full JSON formatting is shown in the saved diff for approval.
-                nl = "\r\n" if "\r\n" in target_text else "\n"
-                after = (json.dumps(target, indent=2, ensure_ascii=False) + "\n").replace("\n", nl)
-                self.propose(dst, after.encode(encoding), rule)
-            self.result(rule, "change" if changes else "pass", f"Same-region comparison: {relative}; updated {len(changes)} BT keys.", [src, dst])
+            source = self.snapshot(src)
+            before = self.snapshot(dst, optional=True)
+            content = base64.b64decode(source["content"])
+            reference_json = carrier_json(decode(content)[0])
+            self.preview(rule, dst, content, reference_path=src,
+                         note="Reference keys for a blank JSON file; existing target values are preserved during normal planning.")
+            if before["revision"] is None:
+                changed = self.propose(dst, content, rule, file_type=source["type"])
+                message = "Add missing carrier JSON at the same model-relative path: " + relative
+            else:
+                target_text, encoding = decode(self.content(dst))
+                merged, added = add_missing_features(reference_json, carrier_json(target_text))
+                changed = False
+                if added:
+                    newline = "\r\n" if "\r\n" in target_text else "\n"
+                    after = (json.dumps(merged, indent=2, ensure_ascii=False) + "\n").replace("\n", newline)
+                    changed = self.propose(dst, after.encode(encoding), rule)
+                message = f"{relative}: added {len(added)} missing keys; existing values kept."
+            self.result(rule, "change" if changed else "pass",
+                        message, [src, dst])
+        for relative in sorted(current.keys() - reference.keys()):
+            self.result(rule, "review", "Current-only carrier file has no same-region reference; left untouched: " + relative,
+                        [current[relative]])
 
 
 def save_plan(plan, directory):

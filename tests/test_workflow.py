@@ -51,8 +51,8 @@ class WorkflowTests(unittest.TestCase):
         plan = self.build()
         self.assertFalse(self.p4.calls)
         self.assertFalse((self.root / "workspace").exists())
-        self.assertEqual(12, len(plan["changes"]))
-        self.assertEqual(18, len({c["rule"] for c in plan["checks"] if c["rule"] != "sheet.review"}))
+        self.assertEqual(11, len(plan["changes"]))
+        self.assertEqual(17, len({c["rule"] for c in plan["checks"] if c["rule"] != "sheet.review"}))
 
     def test_empty_file_previews_show_reference_and_checklist_inputs(self):
         plan = self.build()
@@ -272,33 +272,87 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any("/efs/bluetooth/bt_addr" in x for x in contents))
         self.assertFalse(any("/mnt/vendor/efs" in x for x in contents))
 
-    def test_region_copy_preserves_non_bt_features(self):
+    def test_region_merge_adds_missing_keys_and_preserves_existing_values(self):
         current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
-        self.p4.data[current] = (1, b'{"CarrierFeature_BT_EnableSAP":"TRUE","Other":"keep"}', "text")
-        self.p4.data[reference] = (1, b'{"CarrierFeature_BT_EnableSAP":"FALSE","Other":"different"}', "text")
+        self.p4.data[current] = (1, b'{\r\n"CarrierFeature_BT_EnableSAP":"TRUE","Other":"keep","CurrentOnly":1,"nested":{"Keep":false}\r\n}', "text")
+        content = b'{"CarrierFeature_BT_EnableSAP":"FALSE","Other":"different","Missing":true,"nested":{"Keep":true,"New":0},"NewSection":{"Feature":1}}'
+        self.p4.data[reference] = (1, content, "text")
         plan = self.build()
         change = next(c for c in plan["changes"] if c["path"] == current)
-        content = json.loads(base64.b64decode(change["after"]))
-        self.assertEqual(content, {"CarrierFeature_BT_EnableSAP": "FALSE", "Other": "keep"})
+        after = base64.b64decode(change["after"])
+        self.assertEqual(json.loads(after), {"CarrierFeature_BT_EnableSAP":"TRUE", "Other":"keep",
+                         "CurrentOnly":1, "Missing":True, "nested":{"Keep":False,"New":0},
+                         "NewSection":{"Feature":1}})
+        self.assertIn(b'\r\n', after)
 
-    def test_missing_region_not_copied_from_other_region(self):
+    def test_existing_carrier_values_are_skipped_without_reformatting(self):
+        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        self.p4.data[current] = (1, b'{"Feature":false, "Extra":1}', "text")
+        self.p4.data[reference] = (1, b'{"Feature":true}', "text")
+        plan = self.build()
+        self.assertFalse(any(change["path"] == current for change in plan["changes"]))
+        self.assertTrue(any(check["rule"] == "csc.features" and check["status"] == "pass" for check in plan["checks"]))
+
+    def test_reference_only_region_is_added_without_replacing_another_region(self):
         ref = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         data = self.p4.data.pop(ref)
         self.p4.data[ref.replace("/INS/", "/XSG/")] = data
         plan = self.build()
-        self.assertFalse(any("CSC" in c["path"] for c in plan["changes"]))
-        self.assertEqual(2, sum(c["rule"] == "csc.features" and c["status"] == "review" for c in plan["checks"]))
+        changes = [c for c in plan["changes"] if "CSC" in c["path"]]
+        self.assertEqual(len(changes), 1)
+        self.assertIn("/XSG/system/", changes[0]["path"])
+        self.assertIsNone(changes[0]["revision"])
+        self.assertEqual(base64.b64decode(changes[0]["after"]), data[1])
+        reviews = [c for c in plan["checks"] if c["rule"] == "csc.features" and c["status"] == "review"]
+        self.assertEqual(len(reviews), 1)
+        self.assertIn("/INS/system/", reviews[0]["paths"][0])
 
-    def test_bt_features_in_reordered_arrays_are_not_copied_by_position(self):
-        for role in ("current", "reference"):
-            path = self.config[role]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
-            self.p4.data[path] = (1, b'{"carriers":[{"name":"A","CarrierFeature_BT_EnableSAP":"TRUE"}]}', "text")
-        plan = Planner(self.p4, self.config).build()
-        self.assertTrue(any(c["rule"] == "csc.features" and c["status"] == "blocked" for c in plan["checks"]))
-        self.assertFalse(any("CSC" in c["path"] for c in plan["changes"]))
-        preview = next(p for p in plan["previews"] if p["rule"] == "csc.features")
-        self.assertIn("carriers[0]/CarrierFeature_BT_EnableSAP", preview["content"])
+    def test_existing_carrier_arrays_are_preserved_without_positional_merging(self):
+        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        self.p4.data[current] = (1, b'{"carriers":[{"name":"A"},{"name":"B"}]}', "text")
+        content = b'{"carriers":[{"name":"B","Other":true},{"name":"A","CarrierFeature_BT_EnableSAP":"TRUE"}],"NewArray":[1,2]}'
+        self.p4.data[reference] = (1, content, "text")
+        plan = self.build()
+        self.assertFalse(any(c["rule"] == "csc.features" and c["status"] == "blocked" for c in plan["checks"]))
+        change = next(c for c in plan["changes"] if c["path"] == current)
+        self.assertEqual(json.loads(base64.b64decode(change["after"])),
+                         {"carriers":[{"name":"A"},{"name":"B"}],"NewArray":[1,2]})
+
+    def test_every_collection_and_region_uses_the_same_relative_feature_path(self):
+        current_root = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
+        reference_root = "//BENI_CSC/Strawberry/EXYNOS/m36x"
+        # Old pasted inputs may end at different regions; discovery must still
+        # start at the model and use the source's full model-relative path.
+        self.config["current"]["csc_path"] = current_root + "/OMC/ODM/INS"
+        self.config["reference"]["csc_path"] = reference_root + "/OMC/OXM/INS"
+        files = {"OMC/OXM/INS/system/carrier_feature_plain.json": b'{"AllFeatures": "INS"}',
+                 "OMC/OXM/XSG/system/customer_carrier_feature_plain.json": b'{"AllFeatures": "XSG"}',
+                 "OTHER/COLLECTION/ATT/custom/carrier_feature_plan.josn": b'{"AllFeatures": "ATT"}',
+                 "anything/region/carrier_settings.json": b'{"AllFeatures": "CUSTOM"}',
+                 "carrier_root.json": b'{"RootFeature": true}'}
+        for relative, content in files.items():
+            self.p4.data[reference_root + "/" + relative] = (1, content, "text")
+        # Non-feature files in those region folders must not be copied.
+        self.p4.data[reference_root + "/OXM/INS/system/notes.json"] = (1, b'{"notes":true}', "text")
+        self.p4.data[reference_root + "/unrelated/carrier_folder/notes.json"] = (1, b'{}', "text")
+        self.p4.data[reference_root.replace("m36x", "m35x") + "/OMC/OXM/INS/system/carrier_feature_plain.json"] = (1, b'{}', "text")
+        plan = self.build()
+        changes = {c["path"]: c for c in plan["changes"]}
+        for relative, content in files.items():
+            target = current_root + "/" + relative
+            self.assertIn(target, changes)
+            self.assertEqual(base64.b64decode(changes[target]["after"]), content)
+        self.assertFalse(any(path.endswith("notes.json") for path in changes))
+        self.assertFalse(any("m35x" in path for path in changes))
+        result = execute(self.p4, plan, plan["digest"], acknowledge_reviews=True,
+                         journal_path=self.root / "regional-execution.json")
+        self.assertEqual(result["status"], "applied_pending_review")
+        for relative, content in files.items():
+            target = current_root + "/" + relative
+            self.assertEqual(Path(self.p4.where(target)).read_bytes(), content)
 
     def test_ambiguous_current_file_requires_override(self):
         old = next(p for p in self.p4.data if "PROD_COOSA" in p and "m36x_sssi" in p and p.endswith("BoardConfigCommon.mk"))

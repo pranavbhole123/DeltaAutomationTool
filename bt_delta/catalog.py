@@ -4,6 +4,7 @@ Source: checklist/source_slsi.tsv. Sample a35x/branch/chip values are not defaul
 Add a rule here or supply a JSON catalog with the same schema to extend the tool.
 """
 from __future__ import annotations
+from .csc import CARRIER_FILE_PATTERNS
 
 CHIPSETS = {"s5e8535": "rice_s620", "s5e8835": "quartz_s621p",
             "s5e8825": "papaya_s620", "s5e8845": "rose_s621p"}
@@ -16,10 +17,6 @@ PATH_RULES = {
         "bluetooth_header": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/Bluetooth/bdroid_buildcfg.h"},
         "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/device_common.mk"},
         "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecProductFeature.common"},
-        "floating_feature": [
-            {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/floating_feature.xml"},
-            {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecFloatingFeature.xml"}
-        ],
         "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"}
     },
     "vendor": {
@@ -73,10 +70,8 @@ def default_catalog():
                        "reference_package_patterns": [BT_PACKAGE_PATTERN]}]),
         rule("system.features", "Compare system Bluetooth product features with reference", "B10:C10", "system", "sec_product", "reference_features",
              prefix="SEC_PRODUCT_FEATURE_BLUETOOTH_", key_patterns=[BT_NAME_PATTERN], format="make"),
-        rule("system.floating", "Compare Bluetooth floating features with reference", "B10:C10", "system", "floating_feature", "reference_features",
-             prefix="SEC_FLOATING_FEATURE_BLUETOOTH_", key_patterns=[BT_NAME_PATTERN], format="xml"),
-        rule("csc.features", "Compare regional Bluetooth carrier features", "C10", "csc", "carrier_features", "carrier_features",
-             prefix="CarrierFeature_BT_", key_patterns=[BT_NAME_PATTERN]),
+        rule("csc.features", "Add missing carrier JSON files and features across all model regions", "C10", "csc", "carrier_features", "carrier_features",
+             file_patterns=CARRIER_FILE_PATTERNS),
         rule("system.postfs", "System post-fs-data Bluetooth permissions", "B12", "system", "root_init", "transform",
              actions=[{"type": "init_commands", "event": "on post-fs-data", "commands": POST_FS,
                        "reference_command_patterns": [BT_INIT_PATTERN], "reference_comment_patterns": [BT_COMMENT_PATTERN]}]),

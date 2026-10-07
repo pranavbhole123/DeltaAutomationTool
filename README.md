@@ -37,7 +37,7 @@ Rules use a static checklist baseline plus editable reference selectors. Static 
 
 Open **6. Changelist comparison**, enter one or more developer changelists separated by commas or spaces (for example `123456, 123457, 123458`), and set the current/reference system and vendor templates and CSC roots. Template fields are shared with tab 1; model, Perforce connection and exact path overrides use tab 2. Click **Generate blank plan & compare**.
 
-The comparison generates blank destination files using the latest reference content and checklist rules. The current template supplies file destinations; its existing content does not determine what belongs in the blank plan. Reference headers/folder files, selected board statements, packages/includes, feature values, init commands, regional Bluetooth carrier values and the reference HCF filter block are included. Verification-only HAL/firmware/device checks are listed as manual items and contribute no blank write content.
+The comparison generates blank destination files using the latest reference content and checklist rules. The current template supplies file destinations; its existing content does not determine what belongs in the blank plan. Reference headers/folder files, selected board statements, packages/includes, feature values, init commands, carrier JSON keys from every reference region and the reference HCF filter block are included. Verification-only HAL/firmware/device checks are listed as manual items and contribute no blank write content.
 
 The report compares this blank-file content with the edits introduced by the selected changelists, per filename:
 
@@ -93,13 +93,13 @@ Ambiguous file matches are blocked and listed. Use the **exact depot overrides**
 
 ```json
 {
-  "current.system.floating_feature": "//YOUR_DEPOT/exact/SecFloatingFeature.xml",
-  "reference.system.floating_feature": "//REFERENCE_DEPOT/exact/SecFloatingFeature.xml",
+  "current.system.sec_product": "//YOUR_DEPOT/exact/SecProductFeature.common",
+  "reference.system.sec_product": "//REFERENCE_DEPOT/exact/SecProductFeature.common",
   "current.vendor.manifest": "//YOUR_DEPOT/exact/manifest.xml"
 }
 ```
 
-Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `floating_feature`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
+Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
 
 `common_device` may be set in JSON when it differs from `<model>_common`. AP and model folder names can also be specified. Unsupported/ambiguous view syntax stops resolution rather than guessing.
 
@@ -107,8 +107,8 @@ Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `
 
 - System and vendor rules, SLSI firmware-family mappings, and source-cell references are in `checklist/slsi.json`.
 - BoardConfig rules select assignment names and the Bluetooth board-include filename, not static values. System settings are copied from the reference system BoardConfig; vendor settings come from the reference vendor BoardConfig. Reference values, operators, comments and include paths are preserved. Missing, duplicate or conditional selected statements block the rule rather than falling back to defaults. Unrelated current settings are preserved. An explicit chipset that disagrees with the copied reference WLAN_CHIP must be corrected before applying.
-- Product and floating Bluetooth features follow the reference OS, as the SLSI tab instructs. Current-only flags remain for review. Sample `TRUE` values are not imposed on every product. The separate Feature Flags tab has not been supplied as readable text; its feature-specific eligibility still requires review. Add verified feature-specific rules when that source is available.
-- Carrier JSON compares the same relative region path under the two explicit CSC roots. Missing regional counterparts are reported, never replaced using another region. Only `CarrierFeature_BT_` values are changed; a changed JSON file is formatted and the complete diff shown.
+- Bluetooth product features follow the reference OS, as the SLSI tab instructs. Current-only flags remain for review. Sample `TRUE` values are not imposed on every product. The separate Feature Flags tab has not been supplied as readable text; its feature-specific eligibility still requires review. Add verified feature-specific rules when that source is available.
+- CSC discovery searches the entire selected model folder for JSON filenames containing `carrier_`, regardless of collection, region or subdirectory names. Supply model roots such as `//COOSA_CSC/Strawberry/EXYNOS/m36x/` and the matching reference root. Older inputs ending in a region are resolved back to the model directory. Each reference file keeps its exact model-relative path in current. Missing files are added; existing JSON objects receive only missing keys and nested sections. Existing values, arrays and current-only keys remain untouched, and a file needing no additions is not reformatted. Current-only files are reported. Filename patterns (`*carrier_*.json`, also `.josn`) are editable on `csc.features`; no `OMC`, `ODM`, `OXM`, `INS` or `system` directory is assumed.
 - Headers/Bluetooth folders are copied only where missing in the current model and present in reference. Existing files are compared and reported; entire current folders are not replaced.
 - Manifest entries and HCF copy filters are checked, not blindly rewritten. A mismatch blocks application until resolved. HIDL 1.0 manifest and 1.1 packages are preserved as separately specified by the sheet.
 - The sheet's literal `chown bluetooth bluetooth ro.bt.bdaddr_path` is preserved and explicitly flagged for review. B28 has no event header; the tool uses `on post-fs-data`, inferred from B12, and reports that interpretation.

@@ -3,12 +3,12 @@
   "current": {
     "system_template": "TEMPLATE_D4_M36X-EUR-OPEN_ONEUI90_SYSTEM_CCFLUMEN",
     "vendor_template": "TEMPLATE_D4_M36X-EUR-OPEN_ONEUI90_TIGER_VENDOROSUP_CCFLUMEN",
-    "csc_path": "//COOSA_CSC/Strawberry/EXYNOS/m36x/OMC/ODM/"
+    "csc_path": "//COOSA_CSC/Strawberry/EXYNOS/m36x/"
   },
   "reference": {
     "system_template": "TEMPLATE_D4_M36X-EUR-OPEN_ONEUI85_MR202601_SYSTEM_BBREL",
     "vendor_template": "TEMPLATE_D4_M36X-EUR-OPEN_ONEUI85_MR202601_TIGER_VENDOROSUP_BBREL",
-    "csc_path": "//BENI_CSC/Strawberry/EXYNOS/m36x/OMC/ODM/"
+    "csc_path": "//BENI_CSC/Strawberry/EXYNOS/m36x/"
   },
   "perforce": {
     "port": "107.108.168.60:1716",

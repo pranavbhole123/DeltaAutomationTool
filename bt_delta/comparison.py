@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from .blank import BlankPlanner
+from .csc import model_root
 from .executor import supported_type, verify_workspace_path
 from .perforce import MappingError, PerforceError, PerforceTimeout, parse_view, _revision
 from .planner import decode, digest, save_plan
@@ -263,7 +264,11 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
             except MappingError as exc:
                 mapping_errors.append(f"{key}: {exc}")
     results = []
-    csc_root = plan["config"]["current"]["csc_path"].rstrip("/") + "/"
+    try:
+        csc_root = model_root(plan["config"]["current"]["csc_path"], plan["config"]["model"]) + "/"
+    except ValueError as exc:
+        csc_root = None
+        mapping_errors.append(str(exc))
     for path in sorted(planned.keys() | developer.keys()):
         wanted = planned.get(path)
         deltas = sorted(developer.get(path, []), key=lambda delta: (
@@ -277,7 +282,7 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None):
                 item["template_paths"].append(f"{key}: {relative_for(view, path)}")
             except MappingError:
                 pass
-        if path.startswith(csc_root):
+        if csc_root and path.startswith(csc_root):
             item["template_paths"].append("current.csc: " + path[len(csc_root):])
         item["outside_templates"] = not item["template_paths"]
         item["extra_file"] = bool(deltas and not wanted)

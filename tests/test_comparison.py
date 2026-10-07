@@ -198,13 +198,40 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(any('TRUE' in unit['text'] for unit in result['extra']))
         self.assertFalse(any('/Keep' in unit['text'] for unit in result['extra']))
 
-    def test_xml_value_change_matches_blank_plan_regardless_of_layout(self):
-        item = self.wanted('system.floating')
-        self.submitted(item['path'], base64.b64decode(item['after']))
+    def test_floating_feature_is_absent_from_default_and_blank_plans(self):
+        from bt_delta.catalog import default_catalog
+        self.assertNotIn('floating_feature', default_catalog()['path_rules']['system'])
+        self.assertFalse(any(rule['id'] == 'system.floating' for rule in default_catalog()['rules']))
+        self.assertFalse(any('floating' in entry['path'].lower() for entry in self.blank['changes']))
+        self.assertFalse(any(check['rule'] == 'system.floating' for check in self.blank['checks']))
+
+    def test_blank_carrier_includes_reference_keys_missing_from_an_empty_target(self):
+        item = self.wanted('csc.features')
+        reference = self.config['reference']['csc_path'] + '/INS/system/customer_carrier_feature_plain.json'
+        self.assertEqual(base64.b64decode(item['after']), self.p4.data[reference][1])
+        self.assertIn(b'"Keep": true', base64.b64decode(item['after']))
+        self.submitted(item['path'], b'{"CarrierFeature_BT_EnableSAP": "FALSE", "Keep": false}\n')
         result = self.file(self.report(), item['path'])
-        self.assertFalse(result['missing'])
-        self.assertFalse(result['extra'])
-        self.assertTrue(result['matched'])
+        self.assertTrue(any('/Keep = true' in unit['text'] for unit in result['missing']))
+        self.assertTrue(any('/Keep = false' in unit['text'] for unit in result['extra']))
+
+    def test_carrier_comparison_covers_regions_outside_the_pasted_region_path(self):
+        current_root = '//COOSA_CSC/m36x'
+        reference_root = '//BENI_CSC/m36x'
+        relative = 'OTHER/NEW_REGION/custom/carrier_settings.json'
+        content = b'{"MissingFeature":true}\n'
+        self.p4.data[reference_root + '/' + relative] = (1, content, 'text')
+        self.p4.history[reference_root + '/' + relative, 1] = content
+        path = current_root + '/' + relative
+        self.submitted(path, content)
+        report = self.report()
+        item = self.file(report, path)
+        self.assertTrue(item['planned'])
+        self.assertFalse(item['outside_templates'])
+        self.assertIn('current.csc: ' + relative, item['template_paths'])
+        self.assertTrue(item['matched'])
+        self.assertFalse(item['missing'])
+        self.assertFalse(item['extra'])
 
     def test_verification_only_rule_does_not_create_blank_write_content(self):
         self.assertFalse(any('vendor.hals' in item['rules'] for item in self.blank['changes']))

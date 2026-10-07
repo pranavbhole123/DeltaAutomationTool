@@ -6,10 +6,6 @@
       "bluetooth_header": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/Bluetooth/bdroid_buildcfg.h"},
       "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/device_common.mk"},
       "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecProductFeature.common"},
-      "floating_feature": [
-        {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/floating_feature.xml"},
-        {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecFloatingFeature.xml"}
-      ],
       "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"}
     },
     "vendor": {
@@ -96,28 +92,15 @@
       "format": "make"
     },
     {
-      "id": "system.floating",
-      "title": "Compare Bluetooth floating features with reference",
-      "source": "SLSI!B10:C10",
-      "scope": "system",
-      "target": "floating_feature",
-      "kind": "reference_features",
-      "prefix": "SEC_FLOATING_FEATURE_BLUETOOTH_",
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
-      ],
-      "format": "xml"
-    },
-    {
       "id": "csc.features",
-      "title": "Compare regional Bluetooth carrier features",
+      "title": "Add missing carrier JSON files and features across all model regions",
       "source": "SLSI!C10",
       "scope": "csc",
       "target": "carrier_features",
       "kind": "carrier_features",
-      "prefix": "CarrierFeature_BT_",
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+      "file_patterns": [
+        "*carrier_*.json",
+        "*carrier_*.josn"
       ]
     },
     {

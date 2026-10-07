@@ -77,7 +77,7 @@ class App(ttk.Frame):
         for role, title in (("current", "Current OS"), ("reference", "Reference OS")):
             ttk.Label(self.templates, text=title, font=("Segoe UI", 11, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 8))
             row += 1
-            for field, label in (("system_template", "System template"), ("vendor_template", "Vendor template"), ("csc_path", "CSC depot path")):
+            for field, label in (("system_template", "System template"), ("vendor_template", "Vendor template"), ("csc_path", "CSC model path")):
                 self.entry(self.templates, role + "." + field, label, row)
                 row += 1
         ttk.Label(self.templates, text="Or paste C OS / Reference details in your original format:").grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 5))
@@ -98,7 +98,7 @@ class App(ttk.Frame):
             self.entry(self.settings, key, label, i)
         ttk.Checkbutton(self.settings, text="JDM model: use /efs instead of /mnt/vendor/efs", variable=self.jdm, command=self.invalidate).grid(row=10, column=1, sticky="w", pady=5)
         ttk.Label(self.settings, text="Uses your existing p4 login ticket. Passwords are never requested or saved.").grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
-        ttk.Label(self.settings, text='Optional exact depot overrides as JSON, e.g. {"current.system.floating_feature": "//depot/path/file.xml"}').grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        ttk.Label(self.settings, text='Optional exact depot overrides as JSON, e.g. {"current.system.board_config": "//depot/path/BoardConfigCommon.mk"}').grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 4))
         self.overrides = scrolledtext.ScrolledText(self.settings, height=5, font=("Consolas", 10))
         self.overrides.grid(row=13, column=0, columnspan=2, sticky="nsew")
         self.settings.rowconfigure(13, weight=1)
