@@ -207,7 +207,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_blank_carrier_includes_reference_keys_missing_from_an_empty_target(self):
         item = self.wanted('csc.features')
-        reference = self.config['reference']['csc_path'] + '/INS/system/customer_carrier_feature_plan.json'
+        reference = self.config['reference']['csc_path'] + '/INS/system/customer_carrier_feature_plain.json'
         self.assertEqual(base64.b64decode(item['after']), self.p4.data[reference][1])
         self.assertIn(b'"Keep": true', base64.b64decode(item['after']))
         self.submitted(item['path'], b'{"CarrierFeature_BT_EnableSAP": "FALSE", "Keep": false}\n')
@@ -218,7 +218,7 @@ class ComparisonTests(unittest.TestCase):
     def test_carrier_comparison_covers_regions_outside_the_pasted_region_path(self):
         current_root = '//COOSA_CSC/m36x'
         reference_root = '//BENI_CSC/m36x'
-        relative = 'OTHER/NEW_REGION/custom/customer_carrier_feature_plan.json'
+        relative = 'OTHER/NEW_REGION/custom/customer_carrier_feature_plain.json'
         content = b'{"MissingFeature":true}\n'
         self.p4.data[reference_root + '/' + relative] = (1, content, 'text')
         self.p4.history[reference_root + '/' + relative, 1] = content

@@ -273,8 +273,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(any("/mnt/vendor/efs" in x for x in contents))
 
     def test_region_merge_adds_missing_keys_and_preserves_existing_values(self):
-        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
-        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
+        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         self.p4.data[current] = (1, b'{\r\n"CarrierFeature_BT_EnableSAP":"TRUE","Other":"keep","CurrentOnly":1,"nested":{"Keep":false}\r\n}', "text")
         content = b'{"CarrierFeature_BT_EnableSAP":"FALSE","Other":"different","Missing":true,"nested":{"Keep":true,"New":0},"NewSection":{"Feature":1}}'
         self.p4.data[reference] = (1, content, "text")
@@ -287,8 +287,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(b'\r\n', after)
 
     def test_existing_carrier_values_are_skipped_without_reformatting(self):
-        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
-        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
+        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         self.p4.data[current] = (1, b'{"Feature":false, "Extra":1}', "text")
         self.p4.data[reference] = (1, b'{"Feature":true}', "text")
         plan = self.build()
@@ -296,7 +296,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any(check["rule"] == "csc.features" and check["status"] == "pass" for check in plan["checks"]))
 
     def test_reference_only_region_is_added_without_replacing_another_region(self):
-        ref = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
+        ref = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         data = self.p4.data.pop(ref)
         self.p4.data[ref.replace("/INS/", "/XSG/")] = data
         plan = self.build()
@@ -310,8 +310,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("/INS/system/", reviews[0]["paths"][0])
 
     def test_existing_carrier_arrays_are_preserved_without_positional_merging(self):
-        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
-        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plan.json"
+        current = self.config["current"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
+        reference = self.config["reference"]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json"
         self.p4.data[current] = (1, b'{"carriers":[{"name":"A"},{"name":"B"}]}', "text")
         content = b'{"carriers":[{"name":"B","Other":true},{"name":"A","CarrierFeature_BT_EnableSAP":"TRUE"}],"NewArray":[1,2]}'
         self.p4.data[reference] = (1, content, "text")
@@ -324,31 +324,31 @@ class WorkflowTests(unittest.TestCase):
     def test_carrier_discovery_ignores_other_filenames_in_normal_and_blank_plans(self):
         from bt_delta.blank import BlankPlanner
         root = "//BENI_CSC/m36x/OTHER/REGION/system/"
-        ignored = ("customer_carrier_feature.json", "customer_carrier_feature_plain.json",
+        ignored = ("customer_carrier_feature.json", "customer_carrier_feature_plan.json",
                    "custom_carrier_feature_plan.json", "customer_carrier_feature_plan.josn",
-                   "CUSTOMER_CARRIER_FEATURE_PLAN.JSON", "carrier_settings.json",
-                   "customer_carrier_feature_plan.json.bak", "notes.json")
+                   "CUSTOMER_CARRIER_FEATURE_PLAIN.JSON", "carrier_settings.json",
+                   "customer_carrier_feature_plain.json.bak", "notes.json")
         for filename in ignored:
             # Invalid content catches accidental discovery and attempted parsing.
             self.p4.data[root + filename] = (1, b"\x00\xffnot JSON", "binary")
         for plan in (self.build(), BlankPlanner(self.p4, self.config).build()):
             self.assertFalse(any(check["status"] == "blocked" for check in plan["checks"]))
             paths = [item["path"] for item in plan["changes"] if "csc.features" in item["rules"]]
-            self.assertTrue(all(path.endswith("/customer_carrier_feature_plan.json") for path in paths))
+            self.assertTrue(all(path.endswith("/customer_carrier_feature_plain.json") for path in paths))
             self.assertFalse(any(filename in path for path in paths for filename in ignored))
             self.assertFalse(any(snapshot["path"] == root + filename for snapshot in plan["snapshots"] for filename in ignored))
 
-    def test_missing_reference_plan_reports_all_files_without_reading_binary(self):
+    def test_missing_reference_plain_json_reports_all_files_without_reading_binary(self):
         from bt_delta.blank import BlankPlanner
         self.config["reference"]["csc_path"] = "//BENI_CSC/Strawberry/EXYNOS/m36x"
         self.config["current"]["csc_path"] = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
-        relative = "OMC/ODM/INS/system/customer_carrier_feature_plan.json"
+        relative = "OMC/ODM/INS/system/customer_carrier_feature_plain.json"
         src = self.config["reference"]["csc_path"] + "/" + relative
         dst = self.config["current"]["csc_path"] + "/" + relative
         self.p4.data[src] = (7, b'{"Existing":false,"Missing":true}', "text")
         self.p4.data[dst] = (4, b'{"Existing":true,"CurrentOnly":1}', "text")
         skipped_directory = self.config["reference"]["csc_path"] + "/OTHER/XSG/system"
-        names = ["customer_carrier_feature.json", "customer_carrier_feature_plain.json", "custom_carrier_feature_plan.json"]
+        names = ["customer_carrier_feature.json", "customer_carrier_feature_plan.json", "custom_carrier_feature_plan.json"]
         names += [f"file_{index}.bin" for index in range(12)]
         ignored_paths = [skipped_directory + "/" + name for name in names]
         for path in ignored_paths:
@@ -371,7 +371,7 @@ class WorkflowTests(unittest.TestCase):
             skipped = next(check for check in result["checks"] if check["rule"] == "csc.features"
                            and check["status"] == "skipped" and skipped_directory in check["paths"])
             self.assertEqual(set(skipped["paths"]), {skipped_directory, *ignored_paths})
-            self.assertIn("No customer_carrier_feature_plan.json", skipped["message"])
+            self.assertIn("No customer_carrier_feature_plain.json", skipped["message"])
             for name in names:
                 self.assertIn(name + " (binary)", skipped["message"])
         self.execute(plan)
@@ -396,7 +396,7 @@ class WorkflowTests(unittest.TestCase):
             plan = planner(self.p4, self.config).build()
             check = next(check for check in plan["checks"] if check["rule"] == "csc.features" and check["status"] == "review")
             self.assertIn("returned 1 files", check["message"])
-            self.assertIn("none matched the exact filename customer_carrier_feature_plan.json", check["message"])
+            self.assertIn("none matched the exact filename customer_carrier_feature_plain.json", check["message"])
             skipped = next(check for check in plan["checks"] if check["rule"] == "csc.features" and check["status"] == "skipped")
             self.assertIn(path, skipped["paths"])
 
@@ -424,7 +424,44 @@ class WorkflowTests(unittest.TestCase):
             rendered = summary(plan)
             self.assertIn(path, rendered)
             self.assertIn("customer_carrier_feature.json (binary)", rendered)
-            self.assertIn("No customer_carrier_feature_plan.json", rendered)
+            self.assertIn("No customer_carrier_feature_plain.json", rendered)
+
+    def test_pasted_depot_regions_find_only_plain_json_and_merge_at_identical_paths(self):
+        from bt_delta.blank import BlankPlanner
+        reference_root = "//BENI_CSC/Strawberry/EXYNOS/m36x"
+        current_root = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
+        self.config["reference"]["csc_path"] = reference_root
+        self.config["current"]["csc_path"] = current_root
+        regions = ("OMC/KTC/KTC", "OMC/ODM/CPW", "OMC/ODM/INS", "OMC/ODM/NPB")
+        binaries = set()
+        expected = set()
+        for index, region in enumerate(regions, 1):
+            relative = region + "/system/customer_carrier_feature_plain.json"
+            src, dst = reference_root + "/" + relative, current_root + "/" + relative
+            self.p4.data[src] = (index, b'{"Keep":"reference","Missing":true}', "text")
+            self.p4.data[dst] = (index, b'{"Keep":"current","CurrentOnly":1}', "text")
+            expected.add(dst)
+            for root in (reference_root, current_root):
+                binary = root + "/" + region + "/system/customer_carrier_feature.json"
+                self.p4.data[binary] = (index, b'\x00\xffbinary', "binary")
+                binaries.add(binary)
+        original_read = self.p4.read_file
+        def read_plain_only(path, revision=None):
+            self.assertNotIn(path, binaries)
+            return original_read(path, revision)
+        self.p4.read_file = read_plain_only
+        plan = self.build()
+        changes = [change for change in plan["changes"] if "csc.features" in change["rules"]]
+        self.assertEqual({change["path"] for change in changes}, expected)
+        for change in changes:
+            self.assertEqual(json.loads(base64.b64decode(change["after"])),
+                             {"Keep":"current","CurrentOnly":1,"Missing":True})
+        blank = BlankPlanner(self.p4, self.config).build()
+        self.assertFalse(any(check["status"] == "blocked" for check in blank["checks"]))
+        self.assertEqual({change["path"] for change in blank["changes"] if "csc.features" in change["rules"]}, expected)
+        for result in (plan, blank):
+            self.assertFalse(any(check["rule"] == "csc.features" and check["status"] == "review" for check in result["checks"]))
+            self.assertFalse(any(snapshot["path"] in binaries for snapshot in result["snapshots"]))
 
     def test_every_collection_and_region_uses_the_same_relative_feature_path(self):
         current_root = "//COOSA_CSC/Strawberry/EXYNOS/m36x"
@@ -433,17 +470,17 @@ class WorkflowTests(unittest.TestCase):
         # start at the model and use the source's full model-relative path.
         self.config["current"]["csc_path"] = current_root + "/OMC/ODM/INS"
         self.config["reference"]["csc_path"] = reference_root + "/OMC/OXM/INS"
-        files = {"OMC/OXM/INS/system/customer_carrier_feature_plan.json": b'{"AllFeatures": "INS"}',
-                 "OMC/OXM/XSG/system/customer_carrier_feature_plan.json": b'{"AllFeatures": "XSG"}',
-                 "OTHER/COLLECTION/ATT/custom/customer_carrier_feature_plan.json": b'{"AllFeatures": "ATT"}',
-                 "anything/region/customer_carrier_feature_plan.json": b'{"AllFeatures": "CUSTOM"}',
-                 "customer_carrier_feature_plan.json": b'{"RootFeature": true}'}
+        files = {"OMC/OXM/INS/system/customer_carrier_feature_plain.json": b'{"AllFeatures": "INS"}',
+                 "OMC/OXM/XSG/system/customer_carrier_feature_plain.json": b'{"AllFeatures": "XSG"}',
+                 "OTHER/COLLECTION/ATT/custom/customer_carrier_feature_plain.json": b'{"AllFeatures": "ATT"}',
+                 "anything/region/customer_carrier_feature_plain.json": b'{"AllFeatures": "CUSTOM"}',
+                 "customer_carrier_feature_plain.json": b'{"RootFeature": true}'}
         for relative, content in files.items():
             self.p4.data[reference_root + "/" + relative] = (1, content, "text")
         # Non-feature files in those region folders must not be copied.
         self.p4.data[reference_root + "/OXM/INS/system/notes.json"] = (1, b'{"notes":true}', "text")
         self.p4.data[reference_root + "/unrelated/carrier_folder/notes.json"] = (1, b'{}', "text")
-        self.p4.data[reference_root.replace("m36x", "m35x") + "/OMC/OXM/INS/system/customer_carrier_feature_plan.json"] = (1, b'{}', "text")
+        self.p4.data[reference_root.replace("m36x", "m35x") + "/OMC/OXM/INS/system/customer_carrier_feature_plain.json"] = (1, b'{}', "text")
         plan = self.build()
         changes = {c["path"]: c for c in plan["changes"]}
         for relative, content in files.items():

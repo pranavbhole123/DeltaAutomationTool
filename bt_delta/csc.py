@@ -6,7 +6,7 @@ import logging
 from .perforce import PerforceError
 
 
-CARRIER_FILENAME = "customer_carrier_feature_plan.json"
+CARRIER_FILENAME = "customer_carrier_feature_plain.json"
 
 
 def model_root(path, model):
