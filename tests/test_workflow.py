@@ -347,12 +347,17 @@ class WorkflowTests(unittest.TestCase):
         dst = self.config["current"]["csc_path"] + "/" + relative
         self.p4.data[src] = (7, b'{"Existing":false,"Missing":true}', "text")
         self.p4.data[dst] = (4, b'{"Existing":true,"CurrentOnly":1}', "text")
-        skipped_directory = self.config["reference"]["csc_path"] + "/OTHER/XSG/system"
+        skipped_directory = self.config["reference"]["csc_path"] + "/OTHER/XSG"
         names = ["customer_carrier_feature.json", "customer_carrier_feature_plan.json", "custom_carrier_feature_plan.json"]
         names += [f"file_{index}.bin" for index in range(12)]
-        ignored_paths = [skipped_directory + "/" + name for name in names]
+        ignored_paths = [skipped_directory + "/system/" + name for name in names]
         for path in ignored_paths:
             self.p4.data[path] = (1, b'\x00\xffnot JSON', 'binary')
+        for relative, file_type in (("customer.xml", "text"), ("omc.info", "text+x"),
+                                    ("etc/language.xml", "text"), ("etc/icon/app.png", "binary")):
+            path = skipped_directory + "/" + relative
+            self.p4.data[path] = (1, b'unrelated', file_type)
+            ignored_paths.append(path)
         original_read = self.p4.read_file
         def read_exact_only(path, revision=None):
             self.assertNotIn(path, ignored_paths, "Skipped files must not even be read")
@@ -368,12 +373,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual({change["path"] for change in blank["changes"] if "csc.features" in change["rules"]},
                          {dst})
         for result in (plan, blank):
-            skipped = next(check for check in result["checks"] if check["rule"] == "csc.features"
-                           and check["status"] == "skipped" and skipped_directory in check["paths"])
+            skipped_checks = [check for check in result["checks"] if check["rule"] == "csc.features" and check["status"] == "skipped"]
+            self.assertEqual(len(skipped_checks), 1)
+            skipped = skipped_checks[0]
             self.assertEqual(set(skipped["paths"]), {skipped_directory, *ignored_paths})
             self.assertIn("No customer_carrier_feature_plain.json", skipped["message"])
-            for name in names:
-                self.assertIn(name + " (binary)", skipped["message"])
+            for path in ignored_paths:
+                self.assertIn(path.rsplit("/", 1)[-1] + " (" + self.p4.data[path][2] + ")", skipped["message"])
         self.execute(plan)
         self.assertTrue(Path(self.p4.where(dst)).exists())
         target_skipped = skipped_directory.replace("BENI_CSC", "COOSA_CSC")
@@ -435,6 +441,8 @@ class WorkflowTests(unittest.TestCase):
         regions = ("OMC/KTC/KTC", "OMC/ODM/CPW", "OMC/ODM/INS", "OMC/ODM/NPB")
         binaries = set()
         expected = set()
+        log_messages = []
+        self.p4.progress = log_messages.append
         for index, region in enumerate(regions, 1):
             relative = region + "/system/customer_carrier_feature_plain.json"
             src, dst = reference_root + "/" + relative, current_root + "/" + relative
@@ -445,12 +453,25 @@ class WorkflowTests(unittest.TestCase):
                 binary = root + "/" + region + "/system/customer_carrier_feature.json"
                 self.p4.data[binary] = (index, b'\x00\xffbinary', "binary")
                 binaries.add(binary)
+                # Reproduce the parent/sibling folders from the user's log.
+                for unrelated in ("customer.xml", "omc.info", "etc/language.xml",
+                                  "etc/icon/app.png", "opt/restore.json", "res/media/boot.qmg"):
+                    self.p4.data[root + "/" + region + "/" + unrelated] = (index, b'unrelated', "text")
+            self.p4.data[reference_root + "/OMC/configs/model.config"] = (1, b'unrelated', "text")
         original_read = self.p4.read_file
         def read_plain_only(path, revision=None):
             self.assertNotIn(path, binaries)
+            if path.startswith(reference_root + "/") or path.startswith(current_root + "/"):
+                self.assertTrue(path.endswith("/customer_carrier_feature_plain.json"))
             return original_read(path, revision)
         self.p4.read_file = read_plain_only
         plan = self.build()
+        for path in expected:
+            self.assertTrue(any(f"CSC carrier file found: {path} (text)" in message for message in log_messages))
+            src = path.replace("COOSA_CSC", "BENI_CSC")
+            self.assertTrue(any(f"CSC carrier file found: {src} (text)" in message for message in log_messages))
+        self.assertFalse(any("CSC region skipped:" in message or "CSC directory skipped:" in message
+                             for message in log_messages))
         changes = [change for change in plan["changes"] if "csc.features" in change["rules"]]
         self.assertEqual({change["path"] for change in changes}, expected)
         for change in changes:
@@ -461,6 +482,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual({change["path"] for change in blank["changes"] if "csc.features" in change["rules"]}, expected)
         for result in (plan, blank):
             self.assertFalse(any(check["rule"] == "csc.features" and check["status"] == "review" for check in result["checks"]))
+            self.assertFalse(any(check["rule"] == "csc.features" and check["status"] == "skipped" for check in result["checks"]))
             self.assertFalse(any(snapshot["path"] in binaries for snapshot in result["snapshots"]))
 
     def test_every_collection_and_region_uses_the_same_relative_feature_path(self):

@@ -36,11 +36,27 @@ def carrier_files(p4, root, *, details=None):
         if filename == CARRIER_FILENAME:
             relative = path[len(root) + 1:]
             result[relative] = path
-    skipped = [{"path": directory, "files": sorted(files, key=lambda file: file["path"])}
-               for directory, files in sorted(directories.items())
-               if not any(file["filename"] == CARRIER_FILENAME for file in files)]
+    # Region metadata identifies the subtree to report, rather than treating
+    # etc/, icons/ and each parent directory as a separate missing region.
+    # Discovery itself still searches all paths, including arbitrary layouts.
+    region_roots = set()
+    for directory, files in directories.items():
+        if any(file["filename"] in ("customer.xml", "omc.info") for file in files):
+            region_roots.add(directory)
+        if any(file["filename"].startswith("customer_carrier_feature") for file in files):
+            region_roots.add(directory.rsplit("/", 1)[0]
+                             if directory.rsplit("/", 1)[-1].lower() == "system" else directory)
+    inventory = sorted((file for files in directories.values() for file in files), key=lambda file: file["path"])
+    if inventory and not region_roots:
+        region_roots.add(root)
+    skipped = []
+    for region in sorted(region_roots):
+        if any(path.startswith(region + "/") for path in result.values()):
+            continue
+        files = [file for file in inventory if file["path"].startswith(region + "/")]
+        skipped.append({"path": region, "files": files})
     information = {"query": query, "returned_files": len(records), "matched_files": len(result),
-                   "filename": CARRIER_FILENAME, "skipped_directories": skipped}
+                   "filename": CARRIER_FILENAME, "skipped_regions": skipped}
     if details is not None:
         details.update(information)
     def report(message):
@@ -51,9 +67,13 @@ def carrier_files(p4, root, *, details=None):
 
     report(f"CSC discovery: {query}; {len(records)} files found; "
            f"{len(result)} named exactly {CARRIER_FILENAME}.")
-    for directory in skipped:
-        report(f"CSC directory skipped: {directory['path']}; {CARRIER_FILENAME} is absent.")
-        for file in directory["files"]:
+    file_types = {file["path"]: file["type"] for file in inventory}
+    for path in sorted(result.values()):
+        report(f"CSC carrier file found: {path} ({file_types[path]}).")
+    for region in skipped:
+        report(f"CSC region skipped: {region['path']}; searched the entire subtree, "
+               f"including system/; {CARRIER_FILENAME} is absent.")
+        for file in region["files"]:
             report(f"CSC file found and skipped: {file['path']} ({file['type']}); "
                    f"only {CARRIER_FILENAME} is eligible.")
     return dict(sorted(result.items()))
@@ -66,7 +86,7 @@ def missing_carrier_message(details):
                 "and that the configured Perforce server contains this path.")
     return (f"Perforce returned {details['returned_files']} files for {query}, but none matched "
             f"the exact filename {CARRIER_FILENAME}. Other files were found and skipped. Directories were left untouched; "
-            "their file paths and types are listed in the skipped-directory checks.")
+            "their file paths and types are listed in the skipped-region checks.")
 
 
 def carrier_json(text):

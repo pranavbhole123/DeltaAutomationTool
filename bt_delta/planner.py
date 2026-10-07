@@ -521,11 +521,12 @@ class Planner:
     def report_carrier_discovery(self, rule, discovery):
         if not discovery["matched_files"]:
             self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
-        for directory in discovery["skipped_directories"]:
-            files = directory["files"]
-            self.result(rule, "skipped", f"No {CARRIER_FILENAME} in this reference directory; left untouched. "
+        for region in discovery["skipped_regions"]:
+            files = region["files"]
+            self.result(rule, "skipped", f"No {CARRIER_FILENAME} anywhere under this reference region "
+                        "after searching its entire subtree, including system/; left untouched. "
                         "Files found: " + ", ".join(f"{file['filename']} ({file['type']})" for file in files),
-                        [directory["path"], *[file["path"] for file in files]])
+                        [region["path"], *[file["path"] for file in files]])
 
     def carrier_features(self, rule):
         current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
