@@ -6,7 +6,7 @@ import json
 from .perforce import PerforceError
 
 
-CARRIER_FILE_PATTERNS = ["*carrier_*.json", "*carrier_*.josn"]
+CARRIER_FILE_PATTERNS = ["custom_carrier_feature_plan.json"]
 
 
 def model_root(path, model):

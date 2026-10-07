@@ -114,7 +114,7 @@ def fixture(root):
                 put(cinnamon + "/vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/m36xxx/bt.hcf", b"synthetic-hcf", "binary")
                 put(cinnamon + "/vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/bluetooth.mk", "ifneq ($(filter m36xxx, $(TARGET_PRODUCT)),)\nPRODUCT_COPY_FILES += $(call find-copy-subdir-files,*,$(HCF_PATH)/m36xxx,$(TARGET_COPY_OUT_VENDOR)/firmware/wifi)\nendif\n")
                 put(vendor_android + "/vendor/samsung_slsi/mx140/firmware/quartz_s621p/mx140.bin", b"synthetic-firmware", "binary")
-        put(config[role]["csc_path"] + "/INS/system/customer_carrier_feature_plain.json", '{"CarrierFeature_BT_EnableSAP": "FALSE", "Keep": true}\n')
+        put(config[role]["csc_path"] + "/INS/system/custom_carrier_feature_plan.json", '{"CarrierFeature_BT_EnableSAP": "FALSE", "Keep": true}\n')
     return p4, validate(config)
 
 
