@@ -12,7 +12,10 @@
       "bluetooth_folder": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/Bluetooth"},
       "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/BoardConfigCommon.mk"},
       "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/device_common.mk"},
-      "model_init": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
+      "model_init": [
+        {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
+        {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.model.rc"}
+      ],
       "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/vendor/{common_device}/SecProductFeature.common"},
       "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"},
       "manifest": {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
@@ -313,7 +316,7 @@
     },
     {
       "id": "vendor.hals",
-      "title": "Verify Bluetooth HIDL entries",
+      "title": "Verify reference Bluetooth HIDL/AIDL entries",
       "source": "SLSI!B30:C30",
       "scope": "vendor",
       "target": "manifest",

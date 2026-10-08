@@ -228,14 +228,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(check["status"], "pass")
         self.assertIn("minimum versions", check["message"])
 
-    def test_hidl_check_rejects_version_below_checklist_minimum(self):
+    def test_hidl_check_reports_version_below_reference_minimum(self):
         manifest = next(path for path in self.p4.data
                         if "COOSA" in path and path.endswith("/manifest.xml"))
         revision, content, file_type = self.p4.data[manifest]
         self.p4.data[manifest] = (revision, content.replace(b"<version>1.0</version>", b"<version>0.9</version>", 1), file_type)
         plan = Planner(self.p4, self.config).build()
         check = next(c for c in plan["checks"] if c["rule"] == "vendor.hals")
-        self.assertEqual(check["status"], "blocked")
+        self.assertEqual(check["status"], "review")
+        self.assertIn("reference minimums", check["message"])
 
     def test_hidl_check_discovers_additional_reference_bluetooth_hal(self):
         extra = (b'<hal format="hidl"><name>vendor.demo.hardware.a2dp</name><transport>hwbinder</transport>'
@@ -248,7 +249,7 @@ class WorkflowTests(unittest.TestCase):
         plan = self.build()
         check = next(c for c in plan["checks"] if c["rule"] == "vendor.hals")
         self.assertEqual(check["status"], "pass")
-        self.assertIn("1 additional", check["message"])
+        self.assertTrue(any("vendor.demo.hardware.a2dp" in item["message"] and item["status"] == "pass" for item in plan["checks"]))
 
     def test_missing_current_hcf_filter_block_is_copied_from_reference(self):
         current = next(path for path in self.p4.data
@@ -291,7 +292,7 @@ class WorkflowTests(unittest.TestCase):
         plan = self.build()
         boot_change = next(c for c in plan["changes"] if "system.boot" in c["rules"])
         after = base64.b64decode(boot_change["after"])
-        self.assertIn(b"/dev/ttySAC1", after)
+        self.assertNotIn(b"/dev/ttySAC1", after)
         self.assertIn(b"/dev/ttySAC9", after)
 
     def test_reference_discovers_additional_bluetooth_feature_name(self):

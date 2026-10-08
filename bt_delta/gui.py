@@ -169,7 +169,7 @@ class App(ttk.Frame):
         self.compare_button = ttk.Button(controls, text="Compare with Empty-file preview", command=self.compare)
         self.compare_button.grid(row=1, column=3, sticky="e", padx=8)
         ttk.Label(self.comparison_tab, text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Uses tab 4 previews, including files that already match. If no current preview exists, generates it and displays it in tab 4.", wraplength=1000).pack(anchor="w", pady=(0, 4))
-        ttk.Label(self.comparison_tab, text="Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.", wraplength=1000).pack(anchor="w", pady=(0, 4))
+        ttk.Label(self.comparison_tab, text="Each file shows tool suggestions, developer before/after edits, combined changelist changes and detailed mismatch reasons. Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.", wraplength=1000).pack(anchor="w", pady=(0, 4))
         ttk.Label(self.comparison_tab, textvariable=self.comparison_status, wraplength=1000).pack(anchor="w", pady=(0, 6))
         self.comparison_box = scrolledtext.ScrolledText(self.comparison_tab, wrap="none", font=("Consolas", 10), state="disabled")
         self.comparison_box.pack(fill="both", expand=True)

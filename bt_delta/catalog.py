@@ -23,7 +23,10 @@ PATH_RULES = {
         "bluetooth_folder": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/Bluetooth"},
         "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/BoardConfigCommon.mk"},
         "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/device_common.mk"},
-        "model_init": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
+        "model_init": [
+            {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
+            {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.model.rc"}
+        ],
         "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/vendor/{common_device}/SecProductFeature.common"},
         "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"},
         "manifest": {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
@@ -102,7 +105,7 @@ def default_catalog():
         rule("vendor.postfs", "Vendor-template system root init permissions", "B28", "vendor", "root_init", "transform",
              actions=[{"type": "init_commands", "event": "on post-fs-data", "commands": POST_FS,
                        "reference_command_patterns": [BT_INIT_PATTERN], "reference_comment_patterns": [BT_COMMENT_PATTERN]}]),
-        rule("vendor.hals", "Verify Bluetooth HIDL entries", "B30:C30", "vendor", "manifest", "verify_hals",
+        rule("vendor.hals", "Verify reference Bluetooth HIDL/AIDL entries", "B30:C30", "vendor", "manifest", "verify_hals",
              name_patterns=[r"(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[._-])bt(?:[._-]|$)|a2dp)"],
              expected_hals=[{"name": "android.hardware.bluetooth", "version": "1.0", "interface": "IBluetoothHci"},
                             {"name": "vendor.samsung.hardware.bluetooth", "version": "2.0", "interface": "ISehBluetooth"}]),

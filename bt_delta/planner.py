@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import json
 import re
+import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,9 +14,10 @@ from pathlib import Path
 from .catalog import default_catalog
 from .csc import CARRIER_FILENAME, add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
 from .config import validate
-from .resolver import Resolver, relative_for
+from .resolver import DiscoveryMiss, Resolver, relative_for
+from .diagnostics import emit
 from .transforms import TransformError, transform
-from .reference import augment_actions_from_reference, copy_make_settings
+from .reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
 from .perforce import PerforceTimeout
 
 
@@ -150,6 +152,7 @@ def select_hcf_block(reference_text, config):
 class Planner:
     def __init__(self, p4, config, catalog=None):
         self.p4 = p4
+        self.run_id = uuid.uuid4().hex[:8]
         self.config = validate(config)
         catalog_file = Path(__file__).resolve().parent.parent / "checklist" / "slsi.json"
         self.catalog = catalog if catalog is not None else (json.loads(catalog_file.read_text(encoding="utf-8")) if catalog_file.exists() else default_catalog())
@@ -158,6 +161,28 @@ class Planner:
         self.results = []
         self.previews = []
         self.rule_paths = []
+
+    def log(self, message):
+        emit(self.p4, f"[run {self.run_id}] {message}")
+
+    def start_log(self, mode):
+        self.log(f"START {mode}: model={self.config['model']}; workspace={self.config['perforce']['client']}; "
+                 f"CSC features={self.config['check_csc_features']}")
+        for role in ("current", "reference"):
+            for scope in ("system", "vendor"):
+                self.log(f"Inputs: {role}.{scope} template={self.config[role][scope + '_template']}")
+
+    def reference_actions(self, rule, reference):
+        actions = augment_actions_from_reference(reference, rule["actions"])
+        for action in actions:
+            if action["type"] == "init_commands" and self.config["jdm"]:
+                action["commands"] = [command.replace("/mnt/vendor/efs", "/efs") for command in action["commands"]]
+                self.log(f"{rule['id']}: applied explicit JDM /efs selection to reference init commands.")
+            self.log(f"{rule['id']}: reference-selected {action['type']}: " +
+                     repr({key: value for key, value in action.items() if key in ('event', 'commands', 'packages', 'lines', 'keys')}))
+        if not actions:
+            self.log(f"{rule['id']}: no matching reference actions; checklist defaults will not be inserted.")
+        return actions
 
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
         """Record inspection-only content; it is never passed to the executor."""
@@ -176,11 +201,15 @@ class Planner:
                               "file_type": file_type})
 
     def result(self, rule, status, message, paths=None):
+        self.log(f"[{status.upper()}] {rule['id']}: {message}")
+        for path in paths or []:
+            self.log(f"{rule['id']} evidence path: {path}")
         self.results.append({"rule": rule["id"], "title": rule["title"], "source": rule["source"],
                              "status": status, "message": message, "paths": paths or []})
 
     def snapshot(self, path, *, optional=False):
         if path in self.snapshots:
+            self.log(f"Content cache reused: {path}#{self.snapshots[path]['revision']}; no new p4 print needed.")
             return self.snapshots[path]
         files = self.p4.files(path)
         if not files:
@@ -194,6 +223,7 @@ class Planner:
             content = self.p4.read_file(path, rev)
             snapshot = {"path": path, "revision": rev, "type": files[0].get("type", "text"),
                         "sha256": digest(content), "content": base64.b64encode(content).decode("ascii")}
+        self.log(f"Snapshot recorded: {path}#{snapshot['revision']}; type={snapshot['type']}; SHA-256={snapshot['sha256']}")
         self.snapshots[path] = snapshot
         return snapshot
 
@@ -206,8 +236,10 @@ class Planner:
         before = self.snapshot(path, optional=True)
         original = base64.b64decode(before["content"])
         if content == original and before["revision"] is not None:
+            self.log(f"{rule['id']}: no content changes needed: {path}#{before['revision']}")
             return False
         if path not in self.edits:
+            self.log(f"{rule['id']}: resolving local edit destination in workspace {self.config['perforce']['client']}: {path}")
             local = self.p4.where(path)
             self.edits[path] = {"path": path, "local_path": local, "revision": before["revision"],
                                 "before_sha256": before["sha256"], "before": before["content"],
@@ -226,6 +258,7 @@ class Planner:
                                                        tofile=path + " (proposed)"))
         except UnicodeDecodeError:
             edit["diff"] = f"Binary copy: {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}"
+        self.log(f"{rule['id']}: proposed edit recorded for {path}; {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}")
         return True
 
     def context(self):
@@ -238,18 +271,26 @@ class Planner:
         self.resolver = Resolver(self.p4, self.config, path_rules)
         # Explicit input may choose the new chip, but must not silently turn a
         # non-SLSI reference into an SLSI project.
-        reference_board = self.resolver.discover("reference", "system", "board_config")
-        reference_text, _ = decode(self.content(reference_board))
-        reference_values = make_values(reference_text, "WLAN_")
-        if reference_values.get("WLAN_VENDOR", "").strip('"') != "8":
+        def board_values(scope):
+            try:
+                path = self.resolver.discover("reference", scope, "board_config")
+            except DiscoveryMiss as exc:
+                self.log(f"Optional setup board unavailable: {exc}")
+                return {}
+            return make_values(decode(self.content(path))[0], "WLAN_")
+
+        reference_values = board_values("system")
+        vendor = reference_values.get("WLAN_VENDOR", "").strip('"')
+        if vendor and vendor != "8":
             raise ValueError("Reference WLAN_VENDOR is not SLSI (8)")
         if not self.config.get("chipset"):
-            values = reference_values
-            if values.get("WLAN_VENDOR", "").strip('"') != "8":
-                raise ValueError("Reference WLAN_VENDOR is not SLSI (8); choose an SLSI reference")
+            values = reference_values if reference_values.get("WLAN_CHIP") else board_values("vendor")
+            vendor = values.get("WLAN_VENDOR", "").strip('"')
+            if vendor and vendor != "8":
+                raise ValueError("Reference WLAN_VENDOR is not SLSI (8)")
             chip = values.get("WLAN_CHIP", "").strip('"').lower()
             if not re.fullmatch(r"[a-z0-9_]+", chip):
-                raise ValueError("Cannot infer WLAN_CHIP; enter chipset explicitly")
+                raise ValueError("No usable reference WLAN_CHIP was found; enter chipset explicitly to resolve chipset-specific files. No default chipset is imposed.")
             self.config["chipset"] = chip
         chip = self.config["chipset"].lower()
         self.config["chipset"] = chip
@@ -262,7 +303,11 @@ class Planner:
                 self.config["ap"] = "erd8835"  # Explicitly linked in SLSI!C30.
             else:
                 for scope in ("vendor", "system"):
-                    path = self.resolver.discover("reference", scope, "board_config")
+                    try:
+                        path = self.resolver.discover("reference", scope, "board_config")
+                    except DiscoveryMiss as exc:
+                        self.log(f"AP inference skipped optional board: {exc}")
+                        continue
                     text, _ = decode(self.content(path))
                     aps = set(re.findall(r"^\s*(?:-?include)\s+device/samsung/([^/\s]+)/BoardConfig[^\s]*", text, re.M))
                     aps.discard(self.config["common_device"])
@@ -272,11 +317,13 @@ class Planner:
         self.variables = {"chipset": chip, "firmware": family,
                           "efs": "/efs" if self.config["jdm"] else "/mnt/vendor/efs"}
         ref_chip = reference_values.get("WLAN_CHIP", "").strip('"').lower()
-        if ref_chip != chip:
+        self.log(f"Resolved model inputs: chipset={chip}; AP={self.config.get('ap') or 'unresolved'}; firmware family={family}; HCF variant={self.config.get('hcf_variant') or 'infer from reference'}")
+        if ref_chip and ref_chip != chip:
             self.result({"id": "chip.review", "title": "Chipset differs from reference", "source": "SLSI!C6"},
                         "review", f"Input chipset {chip}; reference chipset {ref_chip}. Confirm this hardware change.")
 
     def build(self):
+        self.start_log("normal plan")
         identity = self.p4.identity()
         workspace = self.p4.workspace_spec()
         plan = {"schema_version": 1, "mode": "live", "created_at": datetime.now(timezone.utc).isoformat(),
@@ -294,24 +341,28 @@ class Planner:
             self.rule_paths = []
             # A failed rule must not leave a partial edit in the plan.
             saved_edits = json.loads(json.dumps(self.edits))
-            results_start = len(self.results)
+            results_start, previews_start = len(self.results), len(self.previews)
+            self.log(f"RULE START {rule['id']}: {rule['title']}; scope={rule['scope']}; target={rule['target']}")
             try:
                 self.apply_rule(rule)
             except Exception as exc:
                 self.edits = saved_edits
                 del self.results[results_start:]
-                self.result(rule, "blocked", str(exc), self.rule_paths)
+                del self.previews[previews_start:]
+                status = ("skipped" if exc.role == "reference" else "review") if isinstance(exc, DiscoveryMiss) else "blocked"
+                self.result(rule, status, str(exc), self.rule_paths + (exc.paths if isinstance(exc, DiscoveryMiss) else []))
                 if isinstance(exc, PerforceTimeout):
                     self.result({"id": "planning.stopped", "title": "Planning stopped", "source": "Perforce connection"},
                                 "blocked", "Remaining rules were not run after the request timeout. Fix the reported request and generate a fresh plan.")
                     break
         self.result({"id": "sheet.review", "title": "Review checklist interpretation", "source": "SLSI!B13,B24,B28,C10"},
-                    "review", "Sheet literally uses 'chown bluetooth bluetooth ro.bt.bdaddr_path'. Review that entry. "
-                    "B28 omits the event; post-fs-data is inferred from B12. Product features follow the reference OS; "
+                    "review", "Checklist settings and command values are selection hints; only matching reference content is used. "
+                    "B28 selects the reference post-fs-data event. Explicit JDM selection maps EFS paths to /efs. Product features follow the reference OS; "
                     "review model and regional eligibility against the Feature Flags tab before approving. "
                     "Sample TRUE/FALSE feature values are not forced across models.")
         plan.update(config=self.config, templates=self.resolver.specs, checks=self.results,
                     snapshots=list(self.snapshots.values()), changes=list(self.edits.values()), previews=self.previews)
+        self.log(f"END normal plan: {len(self.results)} results; {len(self.edits)} proposed file edits; {len(self.previews)} previews.")
         return seal(plan)
 
     def apply_rule(self, rule):
@@ -351,28 +402,34 @@ class Planner:
             return
         if kind == "verify_hcf":
             return self.verify_hcf(rule)
-        path = self.resolver.discover("current", scope, target)
-        self.rule_paths = [path]
+        if kind == "verify_hals":
+            return self.verify_reference_hals(rule)
         if kind == "verify_firmware":
-            snap = self.snapshot(path)
-            expected = self.config.get("firmware_sha256", "").lower()
-            if expected and expected != snap["sha256"]:
-                raise ValueError(f"Firmware does not match approved SHA-256: {snap['sha256']}")
-            self.result(rule, "pass" if expected else "review",
-                        f"Firmware #{snap['revision']}, SHA-256 {snap['sha256']}. " +
-                        ("Matches supplied approved release hash." if expected else "Confirm latest approved firmware with its owner; depot head alone does not prove latest approved release."), [path])
-            return
+            return self.verify_reference_firmware(rule)
+        src = self.resolver.discover("reference", scope, target)
+        self.rule_paths = [src]
+        source_snapshot = self.snapshot(src)
+        reference, _ = decode(base64.b64decode(source_snapshot["content"]))
+        self.log(f"{rule['id']}: reference source={src}; revision={self.snapshots[src]['revision']}")
+        path = self.resolver.discover("current", scope, target)
+        self.rule_paths.append(path)
+        self.log(f"{rule['id']}: current target={path}")
         text, encoding = decode(self.content(path))
         if kind == "reference_make_settings":
-            src = self.resolver.discover("reference", scope, target)
-            snapshot = self.snapshot(src)
-            reference, _ = decode(base64.b64decode(snapshot["content"]))
+            snapshot = source_snapshot
             if "WLAN_CHIP" in rule["keys"]:
                 reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
-                if reference_chip != self.config["chipset"]:
+                if reference_chip and reference_chip != self.config["chipset"]:
                     raise ValueError("Selected chipset differs from reference WLAN_CHIP; align the input before copying reference board settings")
+            selection_notes = []
+            def selection_report(message):
+                self.log(message)
+                selection_notes.append(message)
             empty_preview = copy_make_settings("", reference, rule["keys"], rule.get("include_basenames", []),
-                                               rule.get("key_patterns", []))
+                                               rule.get("key_patterns", []), report=selection_report)
+            if not empty_preview:
+                self.result(rule, "skipped", "Reference contains no selected board settings or includes; current content is preserved.", [src, path])
+                return
             self.preview(rule, path, empty_preview, reference_path=src,
                          note="Selected reference statements that would be placed into an empty target file.")
             after = copy_make_settings(text, reference, rule["keys"], rule.get("include_basenames", []),
@@ -381,60 +438,10 @@ class Planner:
             self.result(rule, "change" if changed else "pass",
                         (f"Selected statements differ; proposed values, operators and include path come from reference #{snapshot['revision']}."
                          if changed else
-                         f"Selected Bluetooth/WLAN statements and include already match reference #{snapshot['revision']}; no change planned. Other file content was not required to match."),
+                         f"Selected Bluetooth/WLAN statements and include already match reference #{snapshot['revision']}; no change planned. Other file content was not required to match.") + "\n" + "\n".join(selection_notes),
                         [src, path])
             return
-        if kind == "verify_hals":
-            root = ET.fromstring(text)
-            checked_names = set()
-            for expected in rule["expected_hals"]:
-                matches = [h for h in root.findall(".//hal") if h.findtext("name") == expected["name"]]
-                if len(matches) != 1:
-                    raise ValueError(f"Expected exactly one {expected['name']} HAL")
-                hal = matches[0]
-                pairs = {(i.findtext("name"), instance.text) for i in hal.findall("interface") for instance in i.findall("instance")}
-                versions = [v.text for v in hal.findall("version") if v.text]
-                if (hal.get("format") != "hidl" or hal.findtext("transport") != "hwbinder"
-                        or not any(hidl_version_at_least(version, expected["version"]) for version in versions)
-                        or (expected["interface"], "default") not in pairs):
-                    raise ValueError(f"HAL differs from checklist: {expected['name']}; review actual manifest")
-                checked_names.add(expected["name"])
-            dynamic_names = []
-            if rule.get("name_patterns"):
-                reference_path = self.resolver.discover("reference", scope, target)
-                reference_text, _ = decode(base64.b64decode(self.snapshot(reference_path)["content"]))
-                reference_root = ET.fromstring(reference_text)
-                selected_name = name_selector("", rule["name_patterns"])
-                for reference_hal in reference_root.findall(".//hal"):
-                    name = reference_hal.findtext("name") or ""
-                    if not selected_name(name) or name in checked_names:
-                        continue
-                    reference_matches = [h for h in reference_root.findall(".//hal") if h.findtext("name") == name]
-                    current_matches = [h for h in root.findall(".//hal") if h.findtext("name") == name]
-                    if len(reference_matches) != 1 or len(current_matches) != 1:
-                        raise ValueError(f"Reference-selected Bluetooth HAL must occur exactly once in both manifests: {name}")
-                    current_hal = current_matches[0]
-                    reference_versions = [v.text for v in reference_hal.findall("version") if v.text]
-                    current_versions = [v.text for v in current_hal.findall("version") if v.text]
-                    reference_pairs = {(i.findtext("name"), instance.text)
-                                       for i in reference_hal.findall("interface") for instance in i.findall("instance")}
-                    current_pairs = {(i.findtext("name"), instance.text)
-                                     for i in current_hal.findall("interface") for instance in i.findall("instance")}
-                    if (reference_hal.get("format") != current_hal.get("format") or
-                            reference_hal.findtext("transport") != current_hal.findtext("transport") or
-                            any(not any(hidl_version_at_least(actual, minimum) for actual in current_versions)
-                                for minimum in reference_versions) or
-                            not reference_pairs.issubset(current_pairs)):
-                        raise ValueError(f"Reference-selected Bluetooth HAL differs in current manifest: {name}")
-                    dynamic_names.append(name)
-                    checked_names.add(name)
-            self.result(rule, "pass",
-                        f"Required static HIDL entries, interfaces and minimum versions match; {len(dynamic_names)} additional reference-selected Bluetooth HAL(s) match.",
-                        [*( [reference_path] if rule.get("name_patterns") else []), path])
-            return
         if kind == "reference_features":
-            src = self.resolver.discover("reference", scope, target)
-            reference, _ = decode(base64.b64decode(self.snapshot(src)["content"]))
             selected = name_selector(rule["prefix"], rule.get("key_patterns", []))
             if rule["format"] == "make":
                 values = make_values(reference, rule["prefix"], rule.get("key_patterns", []))
@@ -465,32 +472,114 @@ class Planner:
             return
         if kind != "transform":
             raise ValueError(f"Unknown rule kind: {kind}")
-        actions = rule["actions"]
-        reference_path = None
-        if any(any(key.startswith("reference_") for key in action) for action in actions):
-            reference_path = self.resolver.discover("reference", scope, target)
-            reference_text, _ = decode(base64.b64decode(self.snapshot(reference_path)["content"]))
-            actions = augment_actions_from_reference(reference_text, actions)
-        after = text
-        empty_preview = ""
+        actions = self.reference_actions(rule, reference)
+        after, empty_preview = text, ""
         for action in actions:
-            after = transform(after, action)
-            empty_preview = transform(empty_preview, action)
-        self.preview(rule, path, empty_preview, reference_path=reference_path,
-                     note=("Static checklist content plus Bluetooth-related statements discovered in the corresponding reference file."
-                           if reference_path else
-                           "Checklist-derived content that would be generated for an empty target; no reference file is used by this rule."))
+            after = apply_reference_action(after, action)
+            empty_preview = apply_reference_action(empty_preview, action)
+        if not empty_preview:
+            self.result(rule, "skipped", "Reference has no matching statements for this rule. Checklist examples are optional; nothing is inserted.", [src, path])
+            return
+        self.preview(rule, path, empty_preview, reference_path=src,
+                     note="Bluetooth content selected from the reference; checklist examples only guide selection.")
         changed = self.propose(path, after.encode(encoding), rule)
-        self.result(rule, "change" if changed else "pass", "Checklist edit proposed." if changed else "Already matches checklist.", [path])
+        self.result(rule, "change" if changed else "pass", "Reference-selected edit proposed." if changed else "Already matches selected reference content.", [src, path])
+
+    def verify_reference_hals(self, rule):
+        reference_path = self.resolver.discover("reference", "vendor", "manifest")
+        self.rule_paths = [reference_path]
+        reference_root = ET.fromstring(decode(self.content(reference_path))[0])
+        selected_name = name_selector("", rule.get("name_patterns", []))
+        hints = {hal["name"] for hal in rule.get("expected_hals", [])}
+        reference_hals = [hal for hal in reference_root.findall(".//hal")
+                          if selected_name(hal.findtext("name") or "") or hal.findtext("name") in hints]
+        found_names = {hal.findtext("name") for hal in reference_hals}
+        for name in sorted(hints - found_names):
+            self.log(f"{rule['id']}: checklist HAL {name} is absent in reference; no entry/version is required for it.")
+        if not reference_hals:
+            self.result(rule, "skipped", "Reference manifest contains no selected Bluetooth HIDL/AIDL entries; checklist HAL examples are not mandatory.", [reference_path])
+            return
+        path = self.resolver.discover("current", "vendor", "manifest")
+        self.rule_paths.append(path)
+        root = ET.fromstring(decode(self.content(path))[0])
+        for reference_hal in reference_hals:
+            name = reference_hal.findtext("name")
+            reference_matches = [hal for hal in reference_hals if hal.findtext("name") == name]
+            matches = [hal for hal in root.findall(".//hal") if hal.findtext("name") == name]
+            if len(reference_matches) != 1 or len(matches) > 1:
+                raise ValueError(f"Ambiguous Bluetooth HAL {name}: reference count={len(reference_matches)}, current count={len(matches)}; cannot choose an entry.")
+            if not matches:
+                self.result(rule, "review", f"Reference HAL {name} ({reference_hal.get('format')}) is absent in current manifest. Verification only; no XML was inserted.", [reference_path, path])
+                continue
+            current = matches[0]
+            def pairs(hal):
+                return {(i.findtext("name"), instance.text) for i in hal.findall("interface") for instance in i.findall("instance")}
+            versions = [v.text.strip() for v in reference_hal.findall("version") if v.text]
+            actual = [v.text.strip() for v in current.findall("version") if v.text]
+            differences = []
+            if reference_hal.get("format") != current.get("format"):
+                differences.append(f"format: reference={reference_hal.get('format')}, current={current.get('format')}")
+            if reference_hal.findtext("transport") != current.findtext("transport"):
+                differences.append(f"transport: reference={reference_hal.findtext('transport')}, current={current.findtext('transport')}")
+            if any(not any(hidl_version_at_least(value, minimum) for value in actual) for minimum in versions):
+                differences.append(f"versions: reference minimums={versions}, current={actual}")
+            if not pairs(reference_hal).issubset(pairs(current)):
+                differences.append(f"interfaces/instances missing from current: {sorted(pairs(reference_hal) - pairs(current))}")
+            expected_fq = {(item.text or "").strip() for item in reference_hal.findall("fqname")}
+            current_fq = {(item.text or "").strip() for item in current.findall("fqname")}
+            if not expected_fq.issubset(current_fq):
+                differences.append(f"reference fqname entries missing from current: {sorted(expected_fq - current_fq)}")
+            self.result(rule, "review" if differences else "pass",
+                        f"Reference {reference_hal.get('format', 'unspecified')} HAL {name}: " +
+                        ("; ".join(differences) if differences else "format, transport, interfaces, fqnames and reference minimum versions match."), [reference_path, path])
+
+    def verify_reference_firmware(self, rule):
+        reference = self.resolver.discover("reference", "vendor", "firmware")
+        self.rule_paths = [reference]
+        source = self.snapshot(reference)
+        path = self.resolver.discover("current", "vendor", "firmware")
+        self.rule_paths.append(path)
+        current = self.snapshot(path)
+        expected = self.config.get("firmware_sha256", "").lower()
+        if expected and expected != current["sha256"]:
+            raise ValueError(f"Firmware {path}#{current['revision']} does not match explicitly supplied approved SHA-256 {expected}; actual={current['sha256']}")
+        self.result(rule, "pass" if expected else "review",
+                    f"Current firmware {path}#{current['revision']}, SHA-256 {current['sha256']}; "
+                    f"reference {reference}#{source['revision']}, SHA-256 {source['sha256']}. " +
+                    ("Bytes match reference. " if current['sha256'] == source['sha256'] else "Bytes differ from reference. ") +
+                    ("Matches supplied approved hash." if expected else "Verification only; confirm release suitability before replacing firmware."), [reference, path])
+
+    def reference_hcf(self, rule):
+        reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
+        self.rule_paths = [reference_mk]
+        reference_text, _ = decode(self.content(reference_mk))
+        if not hcf_blocks(reference_text):
+            self.result(rule, "skipped", "Reference bluetooth.mk has no recognized HCF TARGET_PRODUCT copy block. "
+                        "No default folder/filter is imposed. Check whether this reference uses HCF or a different Make syntax.", [reference_mk])
+            return None
+        selected = select_hcf_block(reference_text, self.config)
+        self.log(f"{rule['id']}: reference HCF selection: folder={selected['variant']}; TARGET_PRODUCT={selected['products']}")
+        records = self.resolver.discover("reference", "vendor", "hcf")
+        hcf = [record['depotFile'] for record in records if record['depotFile'].lower().endswith('.hcf')]
+        if not hcf:
+            self.result(rule, "skipped", "Couldn't find .hcf files in the reference folder selected by bluetooth.mk. "
+                        "Searched: " + "; ".join(self.resolver.attempts.get("reference.vendor.hcf", [])) +
+                        ". Discovered other files: " + ", ".join(record['depotFile'] for record in records), [reference_mk])
+            return None
+        for path in hcf:
+            self.snapshot(path)
+        self.rule_paths.extend(hcf)
+        return reference_mk, selected
 
     def verify_hcf(self, rule):
-        reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
+        source = self.reference_hcf(rule)
+        if source is None:
+            return
+        reference_mk, selected = source
         current_mk = self.resolver.discover("current", "vendor", "hcf_makefile")
-        self.rule_paths = [current_mk]
-        reference_text, _ = decode(self.content(reference_mk))
+        self.rule_paths.append(current_mk)
         current_text, current_encoding = decode(self.content(current_mk))
 
-        selected = select_hcf_block(reference_text, self.config)
         variant = selected["variant"]
 
         current_candidates = [item for item in hcf_blocks(current_text) if item["variant"] == variant]
@@ -508,14 +597,14 @@ class Planner:
                 raise ValueError(f"Current bluetooth.mk mentions {variant} in an unrecognized block; review manually")
             separator = "" if not current_text else ("" if current_text.endswith(("\n", "\r")) else nl) + nl
             updated_mk = current_text + separator + reference_block + nl
-        filter_changed = self.propose(current_mk, updated_mk.encode(current_encoding), rule)
-
         records = self.resolver.discover("current", "vendor", "hcf")
         hcf = [r["depotFile"] for r in records if r["depotFile"].lower().endswith(".hcf")]
         if not hcf:
-            raise ValueError(f"No .hcf file found in chipset/model folder {self.config['chipset']}/{variant}")
+            self.result(rule, "review", "Couldn't find .hcf files in the current selected folder. Searched: " + "; ".join(self.resolver.attempts.get("current.vendor.hcf", [])) + ". Other files found: " + ", ".join(r["depotFile"] for r in records), [current_mk])
+            return
         for path in hcf:
             self.snapshot(path)
+        filter_changed = self.propose(current_mk, updated_mk.encode(current_encoding), rule)
         evidence = ("Resolved HCF folder: " + variant +
                     "; TARGET_PRODUCT values: " + " ".join(selected["products"]) +
                     ". Verified HCF files: " + ", ".join(hcf))

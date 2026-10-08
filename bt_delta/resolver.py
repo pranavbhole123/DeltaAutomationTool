@@ -4,6 +4,15 @@ from __future__ import annotations
 import re
 from .perforce import MappingError, parse_view, translate_path, validate_depot_path
 from .catalog import PATH_RULES
+from .diagnostics import emit
+
+
+class DiscoveryMiss(MappingError):
+    """A configured lookup cannot locate a file; not a server/read failure."""
+
+    def __init__(self, message, role, paths=()):
+        super().__init__(message)
+        self.role, self.paths = role, list(paths)
 
 
 def pattern_regex(pattern: str):
@@ -33,7 +42,7 @@ def relative_for(view, depot: str) -> str:
 class Resolver:
     def __init__(self, p4, config, path_rules=None):
         self.p4, self.config = p4, config
-        self.specs, self.views, self.cache = {}, {}, {}
+        self.specs, self.views, self.cache, self.attempts = {}, {}, {}, {}
         self.path_rules = path_rules or PATH_RULES
         for role in ("current", "reference"):
             for scope in ("system", "vendor"):
@@ -41,6 +50,7 @@ class Resolver:
                 spec = p4.client_spec(config[role][scope + "_template"])
                 self.specs[key] = spec
                 self.views[key] = parse_view(spec)
+                emit(p4, f"Template loaded: {key} = {config[role][scope + '_template']}; {len(self.views[key])} View mappings.")
 
     def override(self, role, scope, target):
         return self.config["paths"].get(f"{role}.{scope}.{target}")
@@ -70,6 +80,7 @@ class Resolver:
         for route in routes:
             anchor = route.get("anchor", "")
             relative = self._expand(route.get("relative", ""))
+            emit(self.p4, f"Route {scope}.{target}: anchor={anchor}; relative={relative}")
             if not anchor.startswith("/") or not anchor.endswith("/") or "..." in anchor or "*" in anchor:
                 raise MappingError(f"Invalid stable anchor for {scope}.{target}: {anchor}")
             for mapping in view:
@@ -83,32 +94,67 @@ class Resolver:
                 probe = candidate + "/__route_probe__" if directory else candidate
                 if pattern_regex(mapping.depot).fullmatch(probe):
                     candidates.add(candidate)
+                    emit(self.p4, f"Route candidate covered by View: {candidate}; mapping={mapping.depot}")
+                else:
+                    emit(self.p4, f"Route candidate rejected before querying Perforce: {candidate}; not covered by mapping={mapping.depot}")
         return sorted(candidates)
 
     def discover(self, role, scope, target, *, optional=False):
         key, directory = f"{role}.{scope}", target in ("bluetooth_folder", "hcf")
         view = self.views[key]
+        label = f"{key}.{target} (template {self.config[role][scope + '_template']})"
+        emit(self.p4, f"Discovery started: {label}; optional={optional}.")
         explicit = self.override(role, scope, target)
-        candidates = ([validate_depot_path(explicit.rstrip("/"))] if explicit
-                      else self._route_candidates(scope, target, view, directory))
+        try:
+            candidates = ([validate_depot_path(explicit.rstrip("/"))] if explicit
+                          else self._route_candidates(scope, target, view, directory))
+        except MappingError as exc:
+            if not str(exc).startswith("Set "):
+                raise
+            message = f"{label}: couldn't construct a search path: {exc}. No Perforce query was made. Resolve this input or provide an exact path override."
+            emit(self.p4, message)
+            raise DiscoveryMiss(message, role) from exc
         if not candidates:
-            raise MappingError(f"{key}.{target}: no configured anchor route exists in this template View; edit path_rules or set an exact path override")
+            routes = self.path_rules.get(scope, {}).get(target, [])
+            routes = [routes] if isinstance(routes, dict) else routes
+            requested = [route['anchor'] + self._expand(route['relative']) for route in routes]
+            message = (f"{label}: couldn't find a mapped search path; no configured anchor route exists in this template View. "
+                       "No p4 files query was made, so server-side absence is not established. "
+                       "Attempted route(s), relative to a matching depot prefix: " + "; ".join(requested) +
+                       ". Check the resolved AP/chipset, template View, or set paths['" + key + "." + target + "']. "
+                       "Included View paths: " + "; ".join(m.depot for m in view if m.modifier != '-'))
+            emit(self.p4, message)
+            raise DiscoveryMiss(message, role, requested)
         records_by_path = {}
+        queries = []
+        self.attempts[f"{key}.{target}"] = queries
         for candidate in candidates:
             query = candidate.rstrip("/") + "/..." if directory else candidate
+            queries.append(query)
             if query not in self.cache:
+                emit(self.p4, f"Discovery query for {label}: {query}")
                 self.cache[query] = self.p4.files(query)
+            else:
+                emit(self.p4, f"Discovery cache reused for {label}: {query}")
+            emit(self.p4, f"Discovery returned {len(self.cache[query])} live file(s): {query}")
             for record in self.cache[query]:
                 path = record["depotFile"]
                 try:
                     relative_for(view, path)
-                except MappingError:
+                except MappingError as exc:
+                    emit(self.p4, f"Discovery file rejected: {path}; {exc}")
                     continue
                 records_by_path[path] = record
+                emit(self.p4, f"Discovery matched {label}: {path}#{record.get('rev', '?')} ({record.get('type', 'unknown type')})")
         records = list(records_by_path.values())
+        if not records:
+            message = (f"{label}: couldn't find an eligible live file. Exact path(s) searched: " + "; ".join(queries) +
+                       ". No returned live file was accepted by the effective template View. "
+                       "Check spelling, filename, head deletion, and View exclusions; the tool does not guess another branch.")
+            emit(self.p4, message)
+            if not optional:
+                raise DiscoveryMiss(message, role, queries)
         if directory:
-            if not records and not optional:
-                raise MappingError(f"{key}.{target}: no files found in exact configured route(s): {', '.join(candidates) or 'none'}")
             return sorted(records, key=lambda r: r["depotFile"])
         if not records and optional:
             return None

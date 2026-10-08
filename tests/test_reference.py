@@ -17,7 +17,8 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(copy_make_settings(result, source, ['BT'], ['BluetoothBoardConfigCommon.mk']), result)
 
     def test_missing_or_ambiguous_source_never_uses_defaults(self):
-        for source in ('# BT := true\n', 'BT := true\nBT := false\n', 'ifdef X\nBT := true\nendif\n'):
+        self.assertEqual(copy_make_settings('KEEP=yes\n', '# BT := true\n', ['BT'], []), 'KEEP=yes\n')
+        for source in ('BT := true\nBT := false\n', 'ifdef X\nBT := true\nendif\n'):
             with self.subTest(source=source), self.assertRaises(TransformError):
                 copy_make_settings('KEEP=yes\n', source, ['BT'], [])
 
@@ -65,7 +66,7 @@ class ReferenceTests(unittest.TestCase):
             change = next(c for c in plan['changes'] if c['rules'][0] == 'system.board')
             self.assertIn(b'BOARD_FUTURE_BDROID_MODE := reference', base64.b64decode(change['after']))
 
-    def test_system_board_keeps_static_keys_required_alongside_patterns(self):
+    def test_system_board_skips_absent_optional_keys_alongside_patterns(self):
         with tempfile.TemporaryDirectory() as root:
             p4, config = fixture(root)
             source = next(p for p in p4.data if 'PROD_BENI' in p and 'm36x_sssi' in p and p.endswith('BoardConfigCommon.mk'))
@@ -73,8 +74,10 @@ class ReferenceTests(unittest.TestCase):
             p4.data[source] = (revision, data.replace(b'BOARD_HAVE_BLUETOOTH_SLSI := true\n', b''), file_type)
             plan = Planner(p4, config).build()
             check = next(c for c in plan['checks'] if c['rule'] == 'system.board')
-            self.assertEqual(check['status'], 'blocked')
-            self.assertIn('BOARD_HAVE_BLUETOOTH_SLSI', check['message'])
+            self.assertEqual(check['status'], 'change')
+            preview = next(item for item in plan['previews'] if item['rule'] == 'system.board')
+            self.assertNotIn('BOARD_HAVE_BLUETOOTH_SLSI', preview['content'])
+            self.assertIn('BOARD_HAVE_BLUETOOTH := true', preview['content'])
 
 
 if __name__ == '__main__':

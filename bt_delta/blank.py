@@ -8,10 +8,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from .perforce import PerforceTimeout
+from .resolver import DiscoveryMiss
 from .csc import carrier_files, carrier_json, model_root
 from .planner import (Planner, canonical, decode, digest, make_values, name_selector,
-                      seal, select_hcf_block, substitute, verify_seal)
-from .reference import augment_actions_from_reference, copy_make_settings
+                      seal, substitute, verify_seal)
+from .reference import apply_reference_action, copy_make_settings
 from .transforms import transform
 
 
@@ -83,6 +84,7 @@ class BlankPlanner(Planner):
         return decode(base64.b64decode(self.edits[path]["after"]))[0] if path in self.edits else ""
 
     def build(self):
+        self.start_log("empty-file preview")
         plan = {"schema_version": 1, "mode": "comparison", "created_at": datetime.now(timezone.utc).isoformat(),
                 "catalog_sha256": digest(canonical(self.catalog)), "source": self.catalog["source"],
                 "connection": self.config["perforce"], "identity": self.p4.identity(),
@@ -98,13 +100,15 @@ class BlankPlanner(Planner):
                 self.rule_paths = []
                 previous = copy.deepcopy(self.edits)
                 previews_start, results_start = len(self.previews), len(self.results)
+                self.log(f"RULE START {rule['id']}: {rule['title']}; scope={rule['scope']}; target={rule['target']}")
                 try:
                     self.blank_rule(rule)
                 except Exception as exc:
                     self.edits = previous
                     del self.previews[previews_start:]
                     del self.results[results_start:]
-                    self.result(rule, "blocked", str(exc), self.rule_paths)
+                    status = ("skipped" if exc.role == "reference" else "review") if isinstance(exc, DiscoveryMiss) else "blocked"
+                    self.result(rule, status, str(exc), self.rule_paths + (exc.paths if isinstance(exc, DiscoveryMiss) else []))
                     if isinstance(exc, PerforceTimeout):
                         self.result({"id": "planning.stopped", "title": "Blank planning stopped", "source": "Perforce"},
                                     "blocked", "Remaining rules were not run after a timeout.")
@@ -112,12 +116,17 @@ class BlankPlanner(Planner):
         plan.update(config=self.config, templates=self.resolver.specs if hasattr(self, "resolver") else {},
                     checks=self.results, snapshots=list(self.snapshots.values()),
                     changes=list(self.edits.values()), previews=self.previews)
+        self.log(f"END empty-file preview: {len(self.results)} results; {len(self.previews)} previews.")
         return seal(plan)
 
     def blank_rule(self, rule):
         kind, scope, target = rule["kind"], rule["scope"], rule["target"]
         if kind in ("manual", "verify_hals", "verify_firmware"):
-            paths = [] if kind == "manual" else [self.resolver.blank_target(scope, target)]
+            paths = []
+            if kind != "manual":
+                src = self.resolver.discover("reference", scope, target)
+                self.rule_paths = [src]
+                paths = [src, self.resolver.blank_target(scope, target)]
             self.result(rule, "manual", rule.get("notes", "Verification-only rule; contributes no blank-file content."), paths)
             return
         if kind == "carrier_features":
@@ -139,27 +148,30 @@ class BlankPlanner(Planner):
                                  file_type=snapshot["type"], reference_path=src)
             return
         if kind == "verify_hcf":
-            src = self.resolver.discover("reference", scope, "hcf_makefile")
+            source = self.reference_hcf(rule)
+            if source is None:
+                return
+            src, selected = source
             path = self.resolver.blank_target(scope, "hcf_makefile")
-            self.rule_paths = [path]
-            reference, _ = decode(self.content(src))
-            selected = select_hcf_block(reference, self.config)
+            self.rule_paths.append(path)
             self.write_blank(path, selected["text"] + "\n", rule, reference_path=src)
             return
+        src = self.resolver.discover("reference", scope, target)
+        self.rule_paths = [src]
+        reference, _ = decode(self.content(src))
         path = self.resolver.blank_target(scope, target)
-        self.rule_paths = [path]
+        self.rule_paths.append(path)
         current_blank = self.blank_content(path)
-        src = None
         if kind == "reference_make_settings":
-            src = self.resolver.discover("reference", scope, target)
-            reference, _ = decode(self.content(src))
-            if "WLAN_CHIP" in rule["keys"] and make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower() != self.config["chipset"]:
+            reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
+            if "WLAN_CHIP" in rule["keys"] and reference_chip and reference_chip != self.config["chipset"]:
                 raise ValueError("Selected chipset differs from reference WLAN_CHIP")
             after = copy_make_settings(current_blank, reference, rule["keys"], rule.get("include_basenames", []),
-                                       rule.get("key_patterns", []))
+                                       rule.get("key_patterns", []), report=self.log)
+            if not copy_make_settings("", reference, rule["keys"], rule.get("include_basenames", []), rule.get("key_patterns", [])):
+                self.result(rule, "skipped", "Reference contains no selected board settings or includes; no blank content generated.", [src, path])
+                return
         elif kind == "reference_features":
-            src = self.resolver.discover("reference", scope, target)
-            reference, _ = decode(self.content(src))
             if rule["format"] == "make":
                 values = make_values(reference, rule["prefix"], rule.get("key_patterns", []))
                 after = transform(current_blank, {"type": "assignments", "values": values, "operator": "="})
@@ -176,14 +188,15 @@ class BlankPlanner(Planner):
                 self.result(rule, "review", "Reference has no selected feature values.", [src, path])
                 return
         elif kind == "transform":
-            actions = rule["actions"]
-            if any(any(key.startswith("reference_") for key in action) for action in actions):
-                src = self.resolver.discover("reference", scope, target)
-                reference, _ = decode(self.content(src))
-                actions = augment_actions_from_reference(reference, actions)
+            actions = self.reference_actions(rule, reference)
             after = current_blank
+            contribution = ""
             for action in actions:
-                after = transform(after, action)
+                after = apply_reference_action(after, action)
+                contribution = apply_reference_action(contribution, action)
+            if not contribution:
+                self.result(rule, "skipped", "Reference has no matching statements; no checklist defaults inserted.", [src, path])
+                return
         else:
             raise ValueError(f"Unsupported blank-plan rule kind: {kind}")
         self.write_blank(path, after, rule, reference_path=src)

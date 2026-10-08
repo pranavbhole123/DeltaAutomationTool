@@ -252,6 +252,118 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(any('BOARD_HAVE_BLUETOOTH := true' in unit['text'] for unit in result['missing']))
         self.assertTrue(any('BOARD_HAVE_BLUETOOTH := false' in unit['text'] for unit in result['extra']))
 
+    def test_verbose_value_difference_identifies_suggestion_reference_and_developer(self):
+        wanted = self.wanted('system.board')
+        self.submitted(wanted['path'], self.p4.data[wanted['path']][1] + b'BOARD_HAVE_BLUETOOTH := false\n')
+        report = self.report()
+        item = self.file(report, wanted['path'])
+        finding = next(f for f in item['findings'] if f['status'] == 'different_value')
+        self.assertEqual(finding['suggested']['text'], 'BOARD_HAVE_BLUETOOTH := true')
+        self.assertEqual(finding['actual'][0]['text'], 'BOARD_HAVE_BLUETOOTH := false')
+        self.assertEqual(finding['actual'][0]['changelists'], ['100'])
+        source = finding['suggested']['sources'][0]
+        self.assertEqual(source['rule'], 'system.board')
+        self.assertIn('BENI', source['reference_path'])
+        self.assertIsInstance(source['reference_revision'], int)
+        self.assertTrue(source['worksheet'])
+        self.assertEqual(report['schema_version'], 3)
+        self.assertGreater(report['counts']['value_differences'], 0)
+        text = comparison_summary(report)
+        self.assertIn('Tool suggests: BOARD_HAVE_BLUETOOTH := true', text)
+        self.assertIn('Developer add: BOARD_HAVE_BLUETOOTH := false [CL 100;', text)
+        self.assertIn(source['reference_path'] + '#' + str(source['reference_revision']), text)
+
+    def test_verbose_replacement_retains_old_new_content_and_pinned_revision_sources(self):
+        wanted = self.wanted('system.board')
+        path = wanted['path']
+        before = b'BOARD_HAVE_BLUETOOTH := false\n'
+        self.p4.data[path] = (1, before, 'text')
+        self.p4.history[path, 1] = before
+        self.submitted(path, b'BOARD_HAVE_BLUETOOTH := true\n')
+        item = self.file(self.report(), path)
+        delta = item['developer_changes'][0]
+        self.assertEqual(delta['removals'][0]['text'], 'BOARD_HAVE_BLUETOOTH := false')
+        self.assertEqual(delta['additions'][0]['text'], 'BOARD_HAVE_BLUETOOTH := true')
+        self.assertEqual(delta['before_source'], path + '#1')
+        self.assertIn(path + '#2', delta['after_source'])
+        self.assertEqual(delta['before_bytes'], len(before))
+        self.assertNotEqual(delta['before_sha256'], delta['after_sha256'])
+        self.assertIn('-BOARD_HAVE_BLUETOOTH := false', delta['diff'])
+        self.assertIn('+BOARD_HAVE_BLUETOOTH := true', delta['diff'])
+        self.assertTrue(item['matched'])
+        self.assertFalse(item['extra'])
+
+    def test_verbose_unchanged_suggestion_does_not_claim_current_content_missing(self):
+        wanted = self.wanted('system.board')
+        self.submitted(wanted['path'], self.p4.data[wanted['path']][1] + b'# unrelated\n')
+        item = self.file(self.report(), wanted['path'])
+        finding = next(f for f in item['findings'] if 'WLAN_CHIP' in f['text'])
+        self.assertEqual(finding['status'], 'missing')
+        self.assertIn('already present and unchanged in CL 100', finding['reason'])
+        self.assertIn('not a claim that the current file lacks', finding['reason'])
+        self.assertEqual(finding['actual'][0]['operation'], 'unchanged')
+        self.assertEqual(finding['actual'][0]['changelists'], ['100'])
+
+    def test_verbose_cancelled_addition_explains_both_changelists_in_revision_order(self):
+        wanted = self.wanted('system.board')
+        path, before = wanted['path'], self.p4.data[wanted['path']][1]
+        self.submitted(path, before + b'BOARD_HAVE_BLUETOOTH := true\n', '100')
+        self.submitted(path, before, '101')
+        item = self.file(self.report('101 100'), path)
+        event = item['cancelled_edits'][0]
+        self.assertEqual(event['earlier']['changelists'], ['100'])
+        self.assertEqual(event['later']['changelists'], ['101'])
+        finding = next(f for f in item['findings'] if f['text'] == 'BOARD_HAVE_BLUETOOTH := true')
+        self.assertIn('does not survive', finding['reason'])
+        self.assertEqual([unit['operation'] for unit in finding['actual']], ['add', 'remove'])
+        self.assertFalse(item['matched'])
+
+    def test_verbose_extra_file_reports_all_four_sections_and_content(self):
+        path = '//OTHER/uncovered.txt'
+        self.submitted(path, b'developer content\n')
+        report = self.report()
+        item = self.file(report, path)
+        self.assertEqual(item['suggested'], [])
+        self.assertTrue(item['extra_file'])
+        self.assertIn('no tab-4 content suggestion', item['findings'][0]['reason'])
+        text = comparison_summary(report)
+        block = text[text.index('FILE ' + str(report['files'].index(item) + 1) + '/') :]
+        for section in ('1. WHAT THE TOOL SUGGESTS ADDING', '2. WHAT EACH CHANGELIST ACTUALLY CHANGED',
+                        '3. COMBINED EFFECT', '4. SUGGESTION VERSUS DEVELOPER RESULT'):
+            self.assertIn(section, block)
+        self.assertIn('+ ADD: developer content [CL 100; line 1]', block)
+        self.assertIn('File absent before this action', block)
+        self.assertIn('+developer content', block)
+
+    def test_malformed_developer_json_retains_raw_diff_and_reports_incomplete(self):
+        wanted = self.wanted('csc.features')
+        self.submitted(wanted['path'], b'{invalid developer json}\n')
+        report = self.report()
+        item = self.file(report, wanted['path'])
+        self.assertTrue(report['incomplete'])
+        self.assertIn('extraction failed', item['errors'][0])
+        self.assertIn('+{invalid developer json}', item['developer_changes'][0]['diff'])
+        self.assertEqual(item['matched'], [])
+        self.assertEqual(item['missing'], [])
+        self.assertEqual(item['extra'], [])
+        self.assertTrue(item['suggested'])
+        self.assertEqual(item['findings'][0]['status'], 'unreadable')
+        self.assertIn('Classification is incomplete', comparison_summary(report))
+
+    def test_comparison_live_log_identifies_sources_suggestions_findings_and_rechecks(self):
+        wanted = self.wanted('system.board')
+        self.submitted(wanted['path'], self.p4.data[wanted['path']][1] + b'BOARD_HAVE_BLUETOOTH := true\n')
+        messages = []
+        self.p4.progress = messages.append
+        report = self.report()
+        text = '\n'.join(messages)
+        self.assertIn('[comparison ' + report['run_id'] + '] START', text)
+        self.assertIn('comparison sources: BEFORE ' + wanted['path'] + '#1', text)
+        self.assertIn('TOOL SUGGESTS ' + wanted['path'], text)
+        self.assertIn('MATCHED ' + wanted['path'], text)
+        self.assertIn('Rechecking CL 100 metadata', text)
+        self.assertIn('[comparison ' + report['run_id'] + '] END', text)
+
     def test_make_package_added_to_multiline_list_matches_blank_single_line(self):
         item = self.wanted('system.packages')
         path = item['path']

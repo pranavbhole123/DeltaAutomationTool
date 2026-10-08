@@ -107,6 +107,26 @@ def fixture(root):
             put(model_root + "/vendor/m36x_common/SecProductFeature.common", "UNRELATED_FEATURE=KEEP\nSEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD=" + ("TRUE\n" if role == "reference" else "FALSE\n"))
             put(system_android + "/system/core/rootdir/init.rc", "on post-fs-data\n    mkdir /data/keep 0755 system system\n\non boot\n    setprop unrelated.keep yes\n")
             if role == "reference":
+                # Synthetic source examples: planning must select these from the
+                # reference, rather than supplying missing checklist defaults.
+                device_path = model_root + "/device/m36x_common/device_common.mk"
+                device_text = "PRODUCT_PACKAGES += BluetoothAgent\n" if scope == "system" else (
+                    "PRODUCT_PACKAGES += libbt-vendor android.hardware.bluetooth@1.1-impl android.hardware.bluetooth@1.1-service\n"
+                    "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk\n"
+                    "include vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/bluetooth.mk\n"
+                    "SLSI_WLBT_UNIFIED_FIRMWARE := quartz_s621p\n")
+                put(device_path, device_text)
+                put(model_root + "/device/m36x_common/init.m36x.rc",
+                    'on init\n    chown bluetooth bluetooth /sys/module/scsc_bt/parameters/bluetooth_address\n'
+                    'on post-fs-data\n    setprop ro.bt.bdaddr_path "/mnt/vendor/efs/bluetooth/bt_addr"\n'
+                    '    mkdir /mnt/vendor/efs/bluetooth 0770 system bluetooth\n')
+                put(system_android + "/system/core/rootdir/init.rc",
+                    'on post-fs-data\n    mkdir /data/misc/bluedroid 02770 bluetooth bluetooth\n'
+                    '    chmod 0660 /data/misc/bluedroid/bt_config.conf\n'
+                    '    mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth\n'
+                    'on boot\n    chmod 0660 /dev/btpower\n'
+                    '    setprop ro.bt.bdaddr_path "/mnt/vendor/efs/bluetooth/bt_addr"\n')
+            if role == "reference":
                 put(model_root + "/device/m36x_common/Bluetooth/bdroid_buildcfg.h", "#pragma once\n// Synthetic reference header\n")
             if scope == "vendor":
                 hals = ''.join(f'<hal format="hidl"><name>{name}</name><transport>hwbinder</transport><version>{ver}</version><interface><name>{interface}</name><instance>default</instance></interface></hal>' for name, ver, interface in [("android.hardware.bluetooth", "1.0", "IBluetoothHci"), ("vendor.samsung.hardware.bluetooth", "2.0", "ISehBluetooth")])

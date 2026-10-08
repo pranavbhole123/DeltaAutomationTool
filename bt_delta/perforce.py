@@ -178,6 +178,7 @@ class P4CLI:
         if failures:
             detail = "; ".join(_text(record.get("data", "Perforce error")).strip()
                                for record in failures)
+            self._report(f"Perforce returned an error record for {label}: {detail}")
             raise PerforceError(f"p4 {command} failed: {detail}")
         if completed.returncode and not (allow_empty and errors and not failures):
             detail = _text(completed.stderr).strip() or "no error details returned"
@@ -220,8 +221,12 @@ class P4CLI:
         records = self._stats(response)
         if not records and not any(str(record.get("generic")) == str(EV_EMPTY) for record in response):
             raise PerforceError(f"p4 files returned no file or EV_EMPTY record for {pattern}")
-        return [record for record in records
+        live = [record for record in records
                 if record.get("action") not in ("delete", "move/delete")]
+        self._report(f"File query result: {pattern}; {len(live)} live file(s), {len(records) - len(live)} deleted head record(s).")
+        if not records:
+            self._report(f"No files returned for exact query: {pattern} (Perforce EV_EMPTY).")
+        return live
 
     def read_file(self, path: str, revision: int | str | None = None) -> bytes:
         path = validate_depot_path(path)
