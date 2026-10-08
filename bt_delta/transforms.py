@@ -64,21 +64,39 @@ def _append(text: str, lines: list[str]) -> str:
     return text + nl.join(lines) + nl
 
 
-def _ensure_lines(text: str, action: dict) -> str:
-    present = set(text.splitlines())
+def _presence(report, message, *, review=False):
+    if report:
+        report({"message": message, "review": review})
+
+
+def _ensure_lines(text: str, action: dict, *, report=None) -> str:
+    present = {(_comment(line)[0].strip() or line.strip()): i + 1 for i, line in enumerate(text.splitlines())
+               if line.strip()}
     missing = []
     for item in action.get("lines", []):
         line = _one_line(item, "line")
-        if line.lstrip().startswith(("include ", "-include ")):
-            matches = [(logical.strip(), depth) for _, _, logical, depth in _make_statements(text)
-                       if logical.strip() == line.strip()]
-            if matches and any(depth for _, depth in matches):
+        requested = _comment(line)[0].split()
+        is_include = bool(requested and requested[0] in ("include", "-include"))
+        if is_include:
+            matches = [(start + 1, logical.strip(), depth) for start, _, logical, depth in _make_statements(text)
+                       if logical.split() and logical.split()[0] in ("include", "-include")
+                       and set(requested[1:]).issubset(logical.split()[1:])]
+            if matches and any(depth for _, _, depth in matches):
                 raise TransformError(f"Include exists conditionally; review before changing: {line}")
             if matches:
+                for number, actual, _ in matches:
+                    different = actual.split()[0] != requested[0]
+                    _presence(report, f"Include already present at line {number}: {actual}. No duplicate added. " +
+                              (f"Reference requests {line}; include versus -include differs, so review applicability." if different else "Whitespace/comments do not create a missing include."),
+                              review=different)
                 continue
-        if line not in present:
+        comparable = ' '.join(requested) if is_include else (_comment(line)[0].strip() or line.strip())
+        if comparable in present:
+            _presence(report, f"Line already present at line {present[comparable]}: {line}. No duplicate added.")
+        else:
+            _presence(report, f"Line absent after scanning the whole current file; adding: {line}")
             missing.append(line)
-            present.add(line)
+            present[comparable] = len(text.splitlines()) + len(missing)
     if missing and text.splitlines() and _continued(text.splitlines()[-1]):
         raise TransformError("Cannot append after an unfinished continuation")
     return _append(text, missing)
@@ -143,7 +161,7 @@ def _make_statements(text: str):
         raise TransformError(f"Unclosed {kind} conditional")
 
 
-def _assignments(text: str, action: dict) -> str:
+def _assignments(text: str, action: dict, *, report=None) -> str:
     values = action.get("values", {})
     if not isinstance(values, dict):
         raise TransformError("assignments.values must be a mapping")
@@ -170,9 +188,11 @@ def _assignments(text: str, action: dict) -> str:
         if len(found) > 1:
             raise TransformError(f"Duplicate active assignments for {key}")
         if not found:
+            _presence(report, f"Assignment {key} absent after scanning the whole current file; adding its reference value.")
             missing.append(f"{key} {operator} {value}")
             continue
         start, end, match, depth = found[0]
+        _presence(report, f"Assignment {key} already exists at line {start + 1}; reuse its location instead of adding a duplicate.")
         if match["value"].strip() == value:
             continue
         if depth:
@@ -188,7 +208,7 @@ def _assignments(text: str, action: dict) -> str:
     return _append("".join(lines), missing)
 
 
-def _make_packages(text: str, action: dict) -> str:
+def _make_packages(text: str, action: dict, *, report=None) -> str:
     packages = []
     for item in action.get("packages", []):
         package = _one_line(item, "package")
@@ -199,11 +219,14 @@ def _make_packages(text: str, action: dict) -> str:
     present = set()
     conditional = set()
     assigned = False
-    for _, _, logical, depth in _make_statements(text):
+    locations = {}
+    for start, _, logical, depth in _make_statements(text):
         match = _ASSIGNMENT.match(logical)
         if not match or match["key"] != "PRODUCT_PACKAGES":
             continue
         tokens = set(match["value"].split())
+        for token in tokens:
+            locations.setdefault(token, []).append(start + 1)
         if depth:
             conditional.update(tokens)
         elif match["operator"] in ("=", ":="):
@@ -216,6 +239,16 @@ def _make_packages(text: str, action: dict) -> str:
     ambiguous = set(missing) & conditional
     if ambiguous:
         raise TransformError("Package exists only conditionally: " + ", ".join(sorted(ambiguous)))
+    for package in packages:
+        if package in locations:
+            reset = package not in present
+            _presence(report, f"Package {package} already appears in PRODUCT_PACKAGES at line(s) " +
+                      ', '.join(map(str, locations[package])) + ". No duplicate added. " +
+                      ("A later assignment resets the effective package list; review that reset instead of silently re-adding the package." if reset else "Found while scanning the whole file."),
+                      review=reset)
+    missing = [package for package in missing if package not in locations]
+    for package in missing:
+        _presence(report, f"Package {package} absent from all current PRODUCT_PACKAGES statements; adding it.")
     if not missing:
         return text
     if len(missing) == 1:
@@ -303,7 +336,7 @@ def _select_init_stanza(lines: list[str], ranges: list[tuple[int, int]],
     return best[0][1], best[0][2]
 
 
-def _init_commands(text: str, action: dict) -> str:
+def _init_commands(text: str, action: dict, *, report=None) -> str:
     event = _one_line(action.get("event", ""), "init event").strip()
     if not event.startswith("on "):
         event = "on " + event
@@ -321,8 +354,41 @@ def _init_commands(text: str, action: dict) -> str:
         requested.add(key)
         commands.append((command, tokens, key))
     lines = text.splitlines(keepends=True)
+    # Search commands throughout all actions, not just the requested event.
+    # Keep section/line evidence: equal text in another event does not imply
+    # equal execution timing, and a target with other values needs review.
+    elsewhere = {}
+    section = "before the first action"
+    verbs = {tokens[0] for _, tokens, _ in commands}
+    for i, line in enumerate(lines):
+        code, _ = _comment(_body(line))
+        if re.match(r"^(?:on|service|import)\s", code):
+            section = ' '.join(code.split())
+            continue
+        if section.startswith('on ') and code.split() and code.split()[0] in verbs:
+            tokens = _tokens(code)
+            elsewhere.setdefault(_command_key(tokens), []).append((i, tokens, section))
+
+    def already_elsewhere(command, tokens, key):
+        found = elsewhere.get(key, [])
+        if not found:
+            _presence(report, f"Init command target absent from all current actions; adding '{command}' to [{event}].")
+            return False
+        details = '; '.join(f"line {i + 1} in [{header}]: " + ' '.join(actual) for i, actual, header in found)
+        exact = all(actual == tokens for _, actual, _ in found)
+        _presence(report, f"No addition of init command '{command}' to [{event}]: " +
+                  ("the same command is already present elsewhere. " if exact else "the same command target already exists elsewhere with different arguments. ") +
+                  details + ". Existing commands and sections are preserved. Review event timing" +
+                  ("." if exact else " and the reference/current argument difference."), review=True)
+        return True
+
+    if not commands:
+        return text
     ranges = _init_stanza_ranges(lines, event)
     if not ranges:
+        commands = [entry for entry in commands if not already_elsewhere(*entry)]
+        if not commands:
+            return text
         if lines and _continued(lines[-1]):
             raise TransformError("Cannot append after an unfinished init continuation")
         return _append(text, [event] + ["    " + command for command, _, _ in commands])
@@ -340,14 +406,25 @@ def _init_commands(text: str, action: dict) -> str:
         if len(found) > 1:
             raise TransformError(f"Duplicate init command target in {event}: {key}")
         if not found:
-            missing.append("    " + command)
+            if not already_elsewhere(command, tokens, key):
+                missing.append("    " + command)
         elif found[0][1] != tokens:
+            # Replacing a local command must not create an exact duplicate of
+            # the requested command already present in a different action.
+            exact_elsewhere = [record for record in elsewhere.get(key, [])
+                               if record[0] != found[0][0] and record[1] == tokens]
+            if exact_elsewhere:
+                already_elsewhere(command, tokens, key)
+                continue
             i = found[0][0]
+            _presence(report, f"Init command target already present at line {i + 1} in [{event}]; update its arguments in place instead of adding a command: {command}.")
             original = lines[i]
             code, comment = _comment(_body(original))
             indent = code[:len(code) - len(code.lstrip())]
             suffix = (code[len(code.rstrip()):] or " ") + comment if comment else ""
             lines[i] = indent + command + suffix + original[len(_body(original)):]
+        else:
+            _presence(report, f"Init command already present at line {found[0][0] + 1} in [{event}]: {command}. No duplicate added.")
     if missing:
         prefix = "".join(lines[:end])
         return _append(prefix, missing) + "".join(lines[end:])
@@ -374,7 +451,7 @@ def _opening(text: str, tag: str):
     return matches[0]
 
 
-def _xml_elements(text: str, action: dict) -> str:
+def _xml_elements(text: str, action: dict, *, report=None) -> str:
     elements = action.get("elements", {})
     if not isinstance(elements, dict):
         raise TransformError("xml_elements.elements must be a mapping")
@@ -391,6 +468,7 @@ def _xml_elements(text: str, action: dict) -> str:
         if len(found) > 1:
             raise TransformError(f"Duplicate XML leaf tag: {tag}")
         if found:
+            _presence(report, f"XML element {tag} already exists in the current XML tree; reuse it instead of adding a duplicate, regardless of its position.")
             if len(found[0]):
                 raise TransformError(f"XML element is not a leaf: {tag}")
             if (found[0].text or "") == value:
@@ -406,6 +484,7 @@ def _xml_elements(text: str, action: dict) -> str:
                 stop = opening.end() + closing.start()
                 text = text[:opening.end()] + escape(value) + text[stop:]
         else:
+            _presence(report, f"XML element {tag} absent from the whole current XML tree; adding it under {parent}.")
             parents = list(root.iter(parent))
             if len(parents) != 1:
                 raise TransformError(f"Cannot locate unique XML insertion parent: {parent}")
@@ -463,7 +542,7 @@ _TRANSFORMS = {
 }
 
 
-def transform(text: str, action: dict) -> str:
+def transform(text: str, action: dict, *, report=None) -> str:
     """Return edited text or raise TransformError; never change external state."""
     if not isinstance(text, str) or not isinstance(action, dict):
         raise TransformError("transform requires text and an action mapping")
@@ -474,4 +553,6 @@ def transform(text: str, action: dict) -> str:
         handler = _TRANSFORMS[kind]
     except (KeyError, TypeError) as exc:
         raise TransformError(f"Unknown transform type: {kind}") from exc
+    if kind in ('init_commands', 'make_packages', 'ensure_lines', 'assignments', 'xml_elements'):
+        return handler(text, action, report=report)
     return handler(text, action)

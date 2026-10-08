@@ -184,6 +184,13 @@ class Planner:
             self.log(f"{rule['id']}: no matching reference actions; checklist defaults will not be inserted.")
         return actions
 
+    def presence_report(self, rule, path):
+        def report(notice):
+            self.log(f"{rule['id']}: file-wide presence check: {path}: {notice['message']}")
+            if notice['review']:
+                self.result(rule, 'review', notice['message'], [path])
+        return report
+
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
         """Record inspection-only content; it is never passed to the executor."""
         raw_content = content if isinstance(content, bytes) else content.encode("utf-8")
@@ -433,7 +440,7 @@ class Planner:
             self.preview(rule, path, empty_preview, reference_path=src,
                          note="Selected reference statements that would be placed into an empty target file.")
             after = copy_make_settings(text, reference, rule["keys"], rule.get("include_basenames", []),
-                                       rule.get("key_patterns", []))
+                                       rule.get("key_patterns", []), report=self.log)
             changed = self.propose(path, after.encode(encoding), rule)
             self.result(rule, "change" if changed else "pass",
                         (f"Selected statements differ; proposed values, operators and include path come from reference #{snapshot['revision']}."
@@ -446,7 +453,8 @@ class Planner:
             if rule["format"] == "make":
                 values = make_values(reference, rule["prefix"], rule.get("key_patterns", []))
                 current = make_values(text, rule["prefix"], rule.get("key_patterns", []))
-                after = transform(text, {"type": "assignments", "values": values, "operator": "="}) if values else text
+                after = transform(text, {"type": "assignments", "values": values, "operator": "="},
+                                  report=self.presence_report(rule, path)) if values else text
                 empty_preview = transform("", {"type": "assignments", "values": values, "operator": "="}) if values else ""
             else:
                 root = ET.fromstring(reference)
@@ -456,7 +464,8 @@ class Planner:
                     raise ValueError("Duplicate/non-leaf reference feature XML elements")
                 current_root = ET.fromstring(text)
                 current = {e.tag: e.text for e in current_root.iter() if selected(e.tag)}
-                after = transform(text, {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else text
+                after = transform(text, {"type": "xml_elements", "elements": values, "parent": current_root.tag},
+                                  report=self.presence_report(rule, path)) if values else text
                 empty_preview = transform(f"<{current_root.tag}></{current_root.tag}>\n",
                                           {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else ""
             if not values:
@@ -474,8 +483,9 @@ class Planner:
             raise ValueError(f"Unknown rule kind: {kind}")
         actions = self.reference_actions(rule, reference)
         after, empty_preview = text, ""
+        presence_start = len(self.results)
         for action in actions:
-            after = apply_reference_action(after, action)
+            after = apply_reference_action(after, action, report=self.presence_report(rule, path))
             empty_preview = apply_reference_action(empty_preview, action)
         if not empty_preview:
             self.result(rule, "skipped", "Reference has no matching statements for this rule. Checklist examples are optional; nothing is inserted.", [src, path])
@@ -483,7 +493,11 @@ class Planner:
         self.preview(rule, path, empty_preview, reference_path=src,
                      note="Bluetooth content selected from the reference; checklist examples only guide selection.")
         changed = self.propose(path, after.encode(encoding), rule)
-        self.result(rule, "change" if changed else "pass", "Reference-selected edit proposed." if changed else "Already matches selected reference content.", [src, path])
+        review_presence = any(item['status'] == 'review' for item in self.results[presence_start:])
+        self.result(rule, "change" if changed else ("review" if review_presence else "pass"),
+                    ("Reference-selected edit proposed; existing entries were checked across the current file." if changed else
+                     "No edit proposed; existing content at other locations needs review as detailed above." if review_presence else
+                     "Already matches selected reference content."), [src, path])
 
     def verify_reference_hals(self, rule):
         reference_path = self.resolver.discover("reference", "vendor", "manifest")

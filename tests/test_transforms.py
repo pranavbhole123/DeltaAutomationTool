@@ -70,10 +70,12 @@ class TransformTests(unittest.TestCase):
         result = self.assert_idempotent(source, {"type": "make_packages", "packages": ["existing", "multiline", "single", "commented", "new"]})
         self.assertEqual(result, source + "PRODUCT_PACKAGES += \\\n    commented \\\n    new\n")
 
-    def test_packages_follow_unconditional_resets(self):
+    def test_packages_do_not_duplicate_entries_before_unconditional_resets(self):
         source = "PRODUCT_PACKAGES += old\nPRODUCT_PACKAGES := newer\n"
-        result = self.assert_idempotent(source, {"type": "make_packages", "packages": ["old", "newer"]})
-        self.assertEqual(result, source + "PRODUCT_PACKAGES += old\n")
+        notices = []
+        result = transform(source, {"type": "make_packages", "packages": ["old", "newer"]}, report=notices.append)
+        self.assertEqual(result, source)
+        self.assertTrue(any(item['review'] and 'resets' in item['message'] for item in notices))
 
     def test_packages_conditional_only_match_is_blocked(self):
         source = "ifdef BOARD\nPRODUCT_PACKAGES += libfeature\nendif\n"
@@ -98,10 +100,14 @@ class TransformTests(unittest.TestCase):
         self.assertIn("setprop unrelated value", result)
         self.assertEqual(result.count("chmod 0660 /data/example"), 1)
 
-    def test_init_does_not_count_command_in_other_event(self):
+    def test_init_reports_different_arguments_in_other_event_without_adding_duplicate_target(self):
         source = "on init\n    mkdir /data/example 0700 root root\n"
-        result = self.assert_idempotent(source, {"type": "init_commands", "event": "post-fs-data", "commands": ["mkdir /data/example 0770 system bluetooth"]})
-        self.assertEqual(result, source + "on post-fs-data\n    mkdir /data/example 0770 system bluetooth\n")
+        notices = []
+        result = transform(source, {"type": "init_commands", "event": "post-fs-data", "commands": ["mkdir /data/example 0770 system bluetooth"]}, report=notices.append)
+        self.assertEqual(result, source)
+        self.assertTrue(notices[0]['review'])
+        self.assertIn('different arguments', notices[0]['message'])
+        self.assertIn('line 2 in [on init]', notices[0]['message'])
 
     def test_init_conflicting_command_targets_are_replaced(self):
         source = "on post-fs-data\r\n    mkdir /data/example 0700 root root\r\n    chown root root /data/example\r\n    setprop example.value old\r\n"

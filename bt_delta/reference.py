@@ -124,10 +124,11 @@ def augment_actions_from_reference(reference, actions):
     return result
 
 
-def apply_reference_action(current, action):
+def apply_reference_action(current, action, *, report=None):
     if action["type"] == "reference_assignments":
-        return copy_make_settings(current, action["reference"], action["keys"], [])
-    return transform(current, action)
+        forward = (lambda message: report({"message": message, "review": False})) if report else None
+        return copy_make_settings(current, action["reference"], action["keys"], [], report=forward)
+    return transform(current, action, report=report)
 
 
 def copy_make_settings(current, reference, keys, include_basenames, key_patterns=None, *, report=None):
@@ -182,6 +183,8 @@ def copy_make_settings(current, reference, keys, include_basenames, key_patterns
         statement = ''.join(source_lines[start:end]).replace('\r\n', '\n').replace('\n', nl)
         if token in destination:
             first, last = destination[token]
+            if report:
+                report(f'Existing {token} at current line(s) {first + 1}-{last}; reuse this location instead of adding a duplicate.')
             # Keep the destination's final-newline convention when possible.
             if lines[last - 1].endswith(('\n', '\r')):
                 statement = statement.rstrip('\r\n') + nl
@@ -189,6 +192,8 @@ def copy_make_settings(current, reference, keys, include_basenames, key_patterns
                 statement = statement.rstrip('\r\n')
             replacements.append((first, last, statement))
         else:
+            if report:
+                report(f'{token} absent after scanning the whole current file; adding the selected reference statement.')
             additions.append(statement.rstrip('\r\n'))
     for start, end, statement in sorted(replacements, reverse=True):
         lines[start:end] = [statement]
