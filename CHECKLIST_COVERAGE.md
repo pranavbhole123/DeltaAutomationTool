@@ -18,7 +18,7 @@ Source: the corrected full SLSI text supplied by the user, preserved as `checkli
 | B26 | vendor.features | Reference vendor Bluetooth product flags |
 | B28 | vendor.postfs | Vendor-template reference system root init commands in post-fs-data |
 | B30:C30 | vendor.hals | Verify reference-selected Bluetooth HIDL/AIDL entries; detailed differences for review |
-| B32 | vendor.hcf | Reference HCF source/files determine applicability; missing paths logged; selected reference filter |
+| B32 | vendor.hcf | Current HCF existence only; exact parent bluetooth.mk; reference Make filter comparison, no reference HCF query or binary copy |
 | B34:C34 | vendor.firmware | Reference/current revision and hash comparison; optional absence and explicit approved-hash review |
 | B36 | device.validation | Post-build phone address and *#2663# checks |
 

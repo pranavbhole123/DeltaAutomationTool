@@ -99,6 +99,12 @@ def search_queries(view, scope, target, config):
         root = static.rstrip('/') if wildcard and static.endswith('/') else static.rsplit('/', 1)[0]
         if not _context(root, scope, target, config, root=True):
             continue
+        if target == 'hcf' and config.get('chipset'):
+            vendor = re.search(r'/VENDOR/[^/]+/vendor/', static, re.I)
+            if vendor:
+                chip_root = static[:vendor.end()] + 'samsung/hardware/vendor/bluetooth/slsi/' + config['chipset']
+                if chip_root.startswith(root + '/'):
+                    root = chip_root
         # One recursive inventory wildcard only. Filename and role matching are
         # local: combining recursive and filename globs can exceed server maps.
         # A partial filename prefix is not a directory, so start at its parent.

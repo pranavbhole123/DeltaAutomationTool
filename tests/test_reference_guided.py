@@ -93,9 +93,9 @@ class ReferenceGuidedTests(unittest.TestCase):
             plan = builder(self.p4, self.config).build()
             for rule, path in zip(('vendor.hals', 'vendor.hcf', 'vendor.firmware'), removed):
                 check = self.checks(plan, rule)[0]
-                self.assertEqual(check['status'], 'skipped')
+                self.assertEqual(check['status'], 'review' if rule == 'vendor.hcf' else 'skipped')
                 self.assertIn(path, check['message'])
-                self.assertIn('Exact path(s) searched', check['message'])
+                self.assertIn('Searched:' if rule == 'vendor.hcf' else 'Exact path(s) searched', check['message'])
 
     def test_missing_current_manifest_is_a_review_with_path_and_reference_evidence(self):
         path = self.path('current', '/manifest.xml')
@@ -143,7 +143,7 @@ class ReferenceGuidedTests(unittest.TestCase):
         self.assertIn('no selected Bluetooth', check['message'])
 
     def test_missing_hcf_files_report_folder_and_leave_makefile_unchanged(self):
-        hcf = self.path('reference', '/bt.hcf')
+        hcf = self.path('current', '/bt.hcf')
         directory = hcf.rsplit('/', 1)[0]
         del self.p4.data[hcf]
         self.p4.data[directory + '/README.txt'] = (1, b'no hcf here', 'text')
@@ -152,7 +152,7 @@ class ReferenceGuidedTests(unittest.TestCase):
         for builder in (Planner, BlankPlanner):
             plan = builder(self.p4, self.config).build()
             check = self.checks(plan, 'vendor.hcf')[0]
-            self.assertEqual(check['status'], 'skipped')
+            self.assertEqual(check['status'], 'review')
             self.assertIn(directory + '/...', check['message'])
             self.assertIn('README.txt', check['message'])
             self.assertNotIn(current, {item['path'] for item in plan['changes']})

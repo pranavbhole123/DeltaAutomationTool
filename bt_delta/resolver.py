@@ -101,7 +101,7 @@ class Resolver:
                         emit(self.p4, f"Route candidate rejected before querying Perforce: {candidate}; not covered by mapping={mapping.depot}")
         return sorted(candidates)
 
-    def discover(self, role, scope, target, *, optional=False):
+    def discover(self, role, scope, target, *, optional=False, exact_path=None):
         key, directory = f"{role}.{scope}", target in ("bluetooth_folder", "hcf")
         view = self.views[key]
         label = f"{key}.{target} (template {self.config[role][scope + '_template']})"
@@ -110,7 +110,7 @@ class Resolver:
         seconds, max_queries, max_records = budget.get('timeout_seconds', 30), budget.get('max_queries', 24), budget.get('max_records', 2000)
         started = time.monotonic()
         deadline = started + seconds
-        explicit = self.override(role, scope, target)
+        explicit = self.override(role, scope, target) or exact_path
         exact_hcf = bool(target == 'hcf' and explicit and explicit.rstrip('/').lower().endswith('.hcf'))
         route_error = ''
         try:
@@ -246,7 +246,12 @@ class Resolver:
                 return explicit.rstrip('/').rsplit('/', 1)[0]
             return explicit.rstrip('/')
         view = self.views[f'{role}.{scope}']
-        candidates = self._route_candidates(scope, target, view, True)
+        try:
+            candidates = self._route_candidates(scope, target, view, True)
+        except MappingError as exc:
+            if not str(exc).startswith('Set '):
+                raise
+            candidates = []
         covered = {root for root in candidates if all(record['depotFile'].startswith(root + '/') for record in records)}
         if len(covered) == 1:
             return covered.pop()

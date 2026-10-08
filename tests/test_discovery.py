@@ -216,6 +216,45 @@ class DiscoveryTests(unittest.TestCase):
             resolver.discover('reference', 'vendor', 'hcf')
         self.assertEqual(resolver.attempts['reference.vendor.hcf'], [missing])
 
+    def test_hcf_only_checks_current_inventory_and_queries_parent_makefile_exactly(self):
+        reference_hcf = self.path('reference', '/bt.hcf')
+        current_hcf = self.path('current', '/bt.hcf')
+        del self.p4.data[reference_hcf]
+        self.config['hcf_variant'] = ''
+        self.config['products'] = []
+        original_read = self.p4.read_file
+        def never_read_hcf(path, *args, **kwargs):
+            if path.lower().endswith('.hcf'):
+                self.fail('HCF existence checks must not read binary contents')
+            return original_read(path, *args, **kwargs)
+        self.p4.read_file = never_read_hcf
+        for builder in (Planner, BlankPlanner):
+            plan = builder(self.p4, self.config).build()
+            checks = [item for item in plan['checks'] if item['rule'] == 'vendor.hcf']
+            self.assertTrue(checks)
+            self.assertFalse(any(item['status'] in ('blocked', 'skipped', 'review') for item in checks))
+            self.assertFalse(any(item['path'].lower().endswith('.hcf') for item in plan['changes']))
+            self.assertFalse(any(item['path'].lower().endswith('.hcf') for item in plan['snapshots']))
+        planner = Planner(self.p4, self.config)
+        planner.build()
+        parent_mk = current_hcf.rsplit('/', 2)[0] + '/bluetooth.mk'
+        self.assertEqual(planner.resolver.attempts['current.vendor.hcf_makefile'], [parent_mk])
+        self.assertNotIn('reference.vendor.hcf', planner.resolver.attempts)
+
+    def test_parent_makefile_resolves_reference_common_through_template_view(self):
+        mk = self.path('reference', '/bluetooth.mk')
+        moved = self.move(mk, mk.replace('/VENDOR/Cinnamon/', '/VENDOR/Common/'))
+        spec = self.p4.specs[self.config['reference']['vendor_template']]
+        spec['View2'] = spec['View2'].replace('/VENDOR/Cinnamon/', '/VENDOR/Common/')
+        del self.p4.data[self.path('reference', '/bt.hcf')]
+        planner = Planner(self.p4, self.config)
+        plan = planner.build()
+        check = next(item for item in plan['checks'] if item['rule'] == 'vendor.hcf')
+        self.assertEqual(check['status'], 'pass')
+        self.assertIn(moved, check['paths'])
+        self.assertEqual(planner.resolver.attempts['reference.vendor.hcf_makefile'], [moved])
+        self.assertNotIn('reference.vendor.hcf', planner.resolver.attempts)
+
     def test_hcf_other_model_or_chipset_is_not_selected(self):
         old = self.path('current', '/bt.hcf')
         del self.p4.data[old]

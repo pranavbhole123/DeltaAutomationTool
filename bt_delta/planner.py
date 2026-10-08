@@ -18,7 +18,7 @@ from .resolver import DiscoveryMiss, Resolver, relative_for
 from .diagnostics import emit
 from .transforms import TransformError, transform
 from .reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
-from .perforce import PerforceTimeout
+from .perforce import MappingError, PerforceTimeout, translate_path
 
 
 def digest(value):
@@ -576,39 +576,56 @@ class Planner:
                     ("Bytes match reference. " if current['sha256'] == source['sha256'] else "Bytes differ from reference. ") +
                     ("Matches supplied approved hash." if expected else "Verification only; confirm release suitability before replacing firmware."), [reference, path])
 
-    def reference_hcf(self, rule):
-        reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
-        self.rule_paths = [reference_mk]
+    def current_hcf(self, rule):
+        records = self.resolver.discover("current", "vendor", "hcf")
+        hcf = [record['depotFile'] for record in records if record['depotFile'].lower().endswith('.hcf')]
+        self.rule_paths = list(hcf)
+        if not hcf:
+            self.result(rule, "review", "Couldn't find .hcf files in current. Searched: " +
+                        "; ".join(self.resolver.attempts.get("current.vendor.hcf", [])) +
+                        ". Other files found: " + ", ".join(record['depotFile'] for record in records))
+            return None
+        # Existence metadata is sufficient; never read or copy HCF binaries.
+        for path in hcf:
+            self.log(f"{rule['id']}: current HCF file exists: {path}; existence check only.")
+        folder = self.resolver.directory_root('current', 'vendor', 'hcf', records)
+        parent_mk = folder.rsplit('/', 1)[0] + '/bluetooth.mk'
+        self.log(f"{rule['id']}: bluetooth.mk is one directory above HCF model folder: {parent_mk}")
+        current_mk = self.resolver.discover('current', 'vendor', 'hcf_makefile', exact_path=parent_mk)
+        self.rule_paths.append(current_mk)
+        return current_mk, hcf
+
+    def reference_hcf(self, rule, current_mk):
+        # Translate the actual current Makefile's build path through the
+        # reference View, so Cinnamon/Common depot layouts resolve separately.
+        try:
+            relative = relative_for(self.resolver.views['current.vendor'], current_mk)
+            exact = translate_path(self.resolver.views['reference.vendor'], relative)
+        except MappingError:
+            exact = None
+        reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile", optional=True, exact_path=exact)
+        if not reference_mk:
+            self.result(rule, "review", "Current HCF files exist. Reference bluetooth.mk was not found, so its TARGET_PRODUCT filter could not be compared. Searched: " +
+                        "; ".join(self.resolver.attempts.get('reference.vendor.hcf_makefile', [])), self.rule_paths)
+            return None
+        self.rule_paths.append(reference_mk)
         reference_text, _ = decode(self.content(reference_mk))
         if not hcf_blocks(reference_text):
-            self.result(rule, "skipped", "Reference bluetooth.mk has no recognized HCF TARGET_PRODUCT copy block. "
-                        "No default folder/filter is imposed. Check whether this reference uses HCF or a different Make syntax.", [reference_mk])
+            self.result(rule, "pass", "Current HCF files exist. Reference bluetooth.mk has no recognized HCF TARGET_PRODUCT copy block; no filter change is suggested.", self.rule_paths)
             return None
         selected = select_hcf_block(reference_text, self.config)
-        self.log(f"{rule['id']}: reference HCF selection: folder={selected['variant']}; TARGET_PRODUCT={selected['products']}")
-        records = self.resolver.discover("reference", "vendor", "hcf")
-        hcf = [record['depotFile'] for record in records if record['depotFile'].lower().endswith('.hcf')]
-        if not hcf:
-            self.result(rule, "skipped", "Couldn't find .hcf files in the reference folder selected by bluetooth.mk. "
-                        "Searched: " + "; ".join(self.resolver.attempts.get("reference.vendor.hcf", [])) +
-                        ". Discovered other files: " + ", ".join(record['depotFile'] for record in records), [reference_mk])
-            return None
-        for path in hcf:
-            self.snapshot(path)
-        self.rule_paths.extend(hcf)
-        if not any('/' + selected['variant'] + '/' in path for path in hcf):
-            self.result(rule, 'review', f"Reference HCF search found files, but none is under the folder {selected['variant']} selected by reference bluetooth.mk. "
-                        "The found paths are listed below. No filter is proposed that points at an absent folder; confirm the model/variant or fix the reference filter.", [reference_mk, *hcf])
-            return None
+        self.log(f"{rule['id']}: reference Make filter: folder={selected['variant']}; TARGET_PRODUCT={selected['products']}; reference HCF files are not queried.")
         return reference_mk, selected
 
     def verify_hcf(self, rule):
-        source = self.reference_hcf(rule)
+        current = self.current_hcf(rule)
+        if current is None:
+            return
+        current_mk, hcf = current
+        source = self.reference_hcf(rule, current_mk)
         if source is None:
             return
         reference_mk, selected = source
-        current_mk = self.resolver.discover("current", "vendor", "hcf_makefile")
-        self.rule_paths.append(current_mk)
         current_text, current_encoding = decode(self.content(current_mk))
 
         variant = selected["variant"]
@@ -628,13 +645,6 @@ class Planner:
                 raise ValueError(f"Current bluetooth.mk mentions {variant} in an unrecognized block; review manually")
             separator = "" if not current_text else ("" if current_text.endswith(("\n", "\r")) else nl) + nl
             updated_mk = current_text + separator + reference_block + nl
-        records = self.resolver.discover("current", "vendor", "hcf")
-        hcf = [r["depotFile"] for r in records if r["depotFile"].lower().endswith(".hcf")]
-        if not hcf:
-            self.result(rule, "review", "Couldn't find .hcf files in the current selected folder. Searched: " + "; ".join(self.resolver.attempts.get("current.vendor.hcf", [])) + ". Other files found: " + ", ".join(r["depotFile"] for r in records), [current_mk])
-            return
-        for path in hcf:
-            self.snapshot(path)
         if not any('/' + variant + '/' in path for path in hcf):
             self.result(rule, 'review', f"Current HCF search found files at another model folder, but the reference filter uses {variant}. "
                         "Found paths are listed below. No duplicate/missing-folder filter was added; review the variant and TARGET_PRODUCT mapping against the reference.",
