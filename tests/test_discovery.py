@@ -1,11 +1,13 @@
 """Versioned anchors, moved/renamed files, and bounded nearby searches."""
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from bt_delta.blank import BlankPlanner
+from bt_delta.catalog import PATH_RULES
 from bt_delta.config import ConfigError, validate
 from bt_delta.demo import fixture
 from bt_delta.discovery import anchor_matches
@@ -105,7 +107,8 @@ class DiscoveryTests(unittest.TestCase):
         resolver = Resolver(self.p4, self.config)
         self.assertEqual(resolver.discover('reference', 'vendor', 'manifest'), reference)
         self.assertEqual(resolver.discover('current', 'vendor', 'manifest'), current)
-        self.assertTrue(any('Fallback selected' in line and current in line for line in self.messages))
+        self.assertEqual(resolver.attempts['current.vendor.manifest'], [current])
+        self.assertTrue(any('Manifest AP from this template View: erd8835' in line for line in self.messages))
 
     def test_manifest_different_universal_ap_is_rejected(self):
         old = self.path('current', '/manifest.xml')
@@ -132,6 +135,39 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertEqual(resolver.discover('reference', 'vendor', 'hcf_makefile'), new_mk)
                 self.assertEqual([row['depotFile'] for row in resolver.discover('reference', 'vendor', 'hcf')], [new_hcf])
                 self.assertTrue(all(query.startswith(prefix + '/') for query in resolver.attempts['reference.vendor.hcf_makefile']))
+                self.assertEqual(resolver.attempts['reference.vendor.hcf_makefile'], [new_mk])
+
+    def test_supplied_common_mapping_and_manifest_paths_use_exact_queries_in_both_catalogs(self):
+        reference_template = 'TEMPLATE_D4_M34X-EUR-OPEN_ONEUI85_MR202601_SOLO_VENDOROSUP_BBREL'
+        current_template = 'TEMPLATE_D4_M34X-EUR-OPEN_ONEUI90_VINCE_VENDOROSUP_CCFLUMEN'
+        branch = '//PROD_BENI/ONEUI_8_5/SM-A266M_A536_A336_M336_M346_A256_P62X_ALL_MR202601/VENDOR_SOLO_ONEUI_4_1'
+        reference_hardware = branch + '/VENDOR/Common/vendor/samsung/hardware/vendor'
+        current_hardware = '//COOSA/VENDOR_VINCE_ONEUI_7_0/VENDOR/Cinnamon/vendor/samsung/hardware/vendor'
+        reference_ap = branch + '/VENDOR/Strawberry/EXYNOS/android/device/samsung/universal8825'
+        current_ap = '//COOSA/VENDOR_VINCE_ONEUI_7_0/VENDOR/Strawberry/EXYNOS2/android/device/samsung/erd8825'
+        self.config.update(model='m34x', common_device='m34x_common', chipset='s5e8825', ap='universal8825', hcf_variant='m34xnsxx')
+        for role, template, hardware, ap in (('reference', reference_template, reference_hardware, reference_ap),
+                                             ('current', current_template, current_hardware, current_ap)):
+            self.config[role]['vendor_template'] = template
+            self.p4.specs[template] = {'Client': template, 'Update': '1',
+                'View0': hardware + '/... //' + template + '/android/vendor/samsung/hardware/vendor/...',
+                'View1': ap + '/... //' + template + '/android/device/samsung/' + ap.rsplit('/', 1)[-1] + '/...'}
+            self.p4.data[hardware + '/bluetooth/slsi/s5e8825/bluetooth.mk'] = (1, b'# parent makefile', 'text')
+            self.p4.data[ap + '/manifest.xml'] = (1, b'<manifest/>', 'text')
+        hcf = current_hardware + '/bluetooth/slsi/s5e8825/m34xnsxx/mx140_bt.hcf'
+        self.p4.data[hcf] = (1, b'binary', 'binary')
+        bundled = json.loads((Path(__file__).resolve().parents[1] / 'checklist/slsi.json').read_text())['path_rules']
+        for rules in (PATH_RULES, bundled):
+            resolver = Resolver(self.p4, self.config, rules)
+            for role, hardware, ap in (('reference', reference_hardware, reference_ap), ('current', current_hardware, current_ap)):
+                mk = hardware + '/bluetooth/slsi/s5e8825/bluetooth.mk'
+                manifest = ap + '/manifest.xml'
+                self.assertEqual(resolver.discover(role, 'vendor', 'hcf_makefile'), mk)
+                self.assertEqual(resolver.attempts[role + '.vendor.hcf_makefile'], [mk])
+                self.assertEqual(resolver.discover(role, 'vendor', 'manifest'), manifest)
+                self.assertEqual(resolver.attempts[role + '.vendor.manifest'], [manifest])
+            self.assertEqual([row['depotFile'] for row in resolver.discover('current', 'vendor', 'hcf')], [hcf])
+            self.assertEqual(resolver.attempts['current.vendor.hcf'], [hcf.rsplit('/', 1)[0] + '/...'])
 
     def test_equal_manifest_candidates_require_override(self):
         old = self.path('current', '/manifest.xml')

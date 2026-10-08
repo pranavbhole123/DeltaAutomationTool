@@ -6,7 +6,7 @@ import time
 from .perforce import MappingError, PerforceSearchLimit, parse_view, translate_path, validate_depot_path
 from .catalog import PATH_RULES
 from .diagnostics import emit
-from .discovery import anchor_matches, match_record, search_queries
+from .discovery import _ap, _same_ap, anchor_matches, match_record, search_queries
 
 
 class DiscoveryMiss(MappingError):
@@ -57,9 +57,10 @@ class Resolver:
     def override(self, role, scope, target):
         return self.config["paths"].get(f"{role}.{scope}.{target}")
 
-    def _expand(self, value):
+    def _expand(self, value, **overrides):
         values = {k: str(self.config.get(k) or "") for k in
                   ("model", "common_device", "ap", "chipset", "firmware", "hcf_variant")}
+        values.update(overrides)
         required = re.findall(r"{(\w+)}", value)
         missing = [name for name in required if not values.get(name)]
         if missing:
@@ -81,8 +82,18 @@ class Resolver:
         candidates = set()
         for route in routes:
             anchor = route.get("anchor", "")
-            relative = self._expand(route.get("relative", ""))
+            variables = {'ap': _ap(self.config)} if target == 'manifest' else {}
+            relative = self._expand(route.get("relative", ""), **variables)
             emit(self.p4, f"Route {scope}.{target}: anchor={anchor}; relative={relative}")
+            if route.get('client_relative'):
+                build_path = self._expand(route['client_relative'], **variables)
+                try:
+                    candidate = translate_path(view, build_path)
+                except MappingError as exc:
+                    emit(self.p4, f"Build-path route not mapped: {build_path}; {exc}")
+                else:
+                    candidates.add(candidate)
+                    emit(self.p4, f"Build-path route resolved through template View: {build_path} -> {candidate}")
             if not anchor.startswith("/") or not anchor.endswith("/") or "..." in anchor or "*" in anchor:
                 raise MappingError(f"Invalid stable anchor for {scope}.{target}: {anchor}")
             for mapping in view:
@@ -90,7 +101,14 @@ class Resolver:
                     continue
                 static = re.split(r"\.\.\.|\*", mapping.depot, maxsplit=1)[0]
                 for match in anchor_matches(anchor, static):
-                    candidate = static[:match.start()] + match.group() + relative
+                    mapped_relative = relative
+                    if route.get('ap_from_view'):
+                        actual_ap = static[match.end():].split('/', 1)[0]
+                        if not actual_ap or not _same_ap(actual_ap.lower(), variables.get('ap', '').lower()):
+                            continue
+                        mapped_relative = self._expand(route['relative'], ap=actual_ap)
+                        emit(self.p4, f"Manifest AP from this template View: {actual_ap}; configured AP hint={variables['ap']}")
+                    candidate = static[:match.start()] + match.group() + mapped_relative
                     if match.group() != anchor:
                         emit(self.p4, f"Anchor variant accepted: configured={anchor}; mapped={match.group()}; template mapping={mapping.depot}")
                     probe = candidate + "/__route_probe__" if directory else candidate

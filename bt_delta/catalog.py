@@ -9,8 +9,8 @@ from .csc import CARRIER_FILENAME
 CHIPSETS = {"s5e8535": "rice_s620", "s5e8835": "quartz_s621p",
             "s5e8825": "papaya_s620", "s5e8845": "rose_s621p"}
 
-# Stable anchors come from template View mappings. Edit or append a route when
-# a future branch changes layout; release/depot prefixes are never hardcoded.
+# Build paths and stable subtrees resolve through template View mappings;
+# release/depot prefixes are never hardcoded.
 PATH_RULES = {
     "system": {
         "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/BoardConfigCommon.mk"},
@@ -29,9 +29,14 @@ PATH_RULES = {
         ],
         "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/vendor/{common_device}/SecProductFeature.common"},
         "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"},
-        "manifest": {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
-        "hcf_makefile": {"anchor": "/VENDOR/Cinnamon/vendor/", "relative": "samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"},
-        "hcf": {"anchor": "/VENDOR/Cinnamon/vendor/", "relative": "samsung/hardware/vendor/bluetooth/slsi/{chipset}/{hcf_variant}"},
+        "manifest": [
+            {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
+            {"anchor": "/android/device/samsung/", "relative": "{ap}/manifest.xml", "ap_from_view": True}
+        ],
+        "hcf_makefile": {"anchor": "/vendor/samsung/hardware/vendor/", "relative": "bluetooth/slsi/{chipset}/bluetooth.mk",
+                         "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"},
+        "hcf": {"anchor": "/vendor/samsung/hardware/vendor/", "relative": "bluetooth/slsi/{chipset}/{hcf_variant}",
+                "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/{hcf_variant}"},
         "firmware": {"anchor": "/EXYNOS/android/", "relative": "vendor/samsung_slsi/mx140/firmware/{firmware}/mx140.bin"}
     }
 }
