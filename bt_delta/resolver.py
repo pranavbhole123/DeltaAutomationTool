@@ -1,10 +1,12 @@
-"""Resolve checklist targets from explicit, editable template-view routes."""
+"""Resolve file roles with editable routes and bounded searches inside Views."""
 from __future__ import annotations
 
 import re
-from .perforce import MappingError, parse_view, translate_path, validate_depot_path
+import time
+from .perforce import MappingError, PerforceSearchLimit, parse_view, translate_path, validate_depot_path
 from .catalog import PATH_RULES
 from .diagnostics import emit
+from .discovery import anchor_matches, match_record, search_queries
 
 
 class DiscoveryMiss(MappingError):
@@ -87,70 +89,136 @@ class Resolver:
                 if mapping.modifier == "-":
                     continue
                 static = re.split(r"\.\.\.|\*", mapping.depot, maxsplit=1)[0]
-                pos = static.find(anchor)
-                if pos < 0:
-                    continue
-                candidate = static[:pos] + anchor + relative
-                probe = candidate + "/__route_probe__" if directory else candidate
-                if pattern_regex(mapping.depot).fullmatch(probe):
-                    candidates.add(candidate)
-                    emit(self.p4, f"Route candidate covered by View: {candidate}; mapping={mapping.depot}")
-                else:
-                    emit(self.p4, f"Route candidate rejected before querying Perforce: {candidate}; not covered by mapping={mapping.depot}")
+                for match in anchor_matches(anchor, static):
+                    candidate = static[:match.start()] + match.group() + relative
+                    if match.group() != anchor:
+                        emit(self.p4, f"Anchor variant accepted: configured={anchor}; mapped={match.group()}; template mapping={mapping.depot}")
+                    probe = candidate + "/__route_probe__" if directory else candidate
+                    if pattern_regex(mapping.depot).fullmatch(probe):
+                        candidates.add(candidate)
+                        emit(self.p4, f"Route candidate covered by View: {candidate}; mapping={mapping.depot}")
+                    else:
+                        emit(self.p4, f"Route candidate rejected before querying Perforce: {candidate}; not covered by mapping={mapping.depot}")
         return sorted(candidates)
 
     def discover(self, role, scope, target, *, optional=False):
         key, directory = f"{role}.{scope}", target in ("bluetooth_folder", "hcf")
         view = self.views[key]
         label = f"{key}.{target} (template {self.config[role][scope + '_template']})"
-        emit(self.p4, f"Discovery started: {label}; optional={optional}.")
+        emit(self.p4, f"Discovery started: {label}; optional={optional}; strategy=numeric-version anchors + bounded mapped keyword search.")
+        budget = self.config.get('discovery', {})
+        seconds, max_queries, max_records = budget.get('timeout_seconds', 30), budget.get('max_queries', 24), budget.get('max_records', 2000)
+        started = time.monotonic()
+        deadline = started + seconds
         explicit = self.override(role, scope, target)
+        route_error = ''
         try:
             candidates = ([validate_depot_path(explicit.rstrip("/"))] if explicit
                           else self._route_candidates(scope, target, view, directory))
         except MappingError as exc:
             if not str(exc).startswith("Set "):
                 raise
-            message = f"{label}: couldn't construct a search path: {exc}. No Perforce query was made. Resolve this input or provide an exact path override."
-            emit(self.p4, message)
-            raise DiscoveryMiss(message, role) from exc
-        if not candidates:
-            routes = self.path_rules.get(scope, {}).get(target, [])
-            routes = [routes] if isinstance(routes, dict) else routes
-            requested = [route['anchor'] + self._expand(route['relative']) for route in routes]
-            message = (f"{label}: couldn't find a mapped search path; no configured anchor route exists in this template View. "
-                       "No p4 files query was made, so server-side absence is not established. "
-                       "Attempted route(s), relative to a matching depot prefix: " + "; ".join(requested) +
-                       ". Check the resolved AP/chipset, template View, or set paths['" + key + "." + target + "']. "
-                       "Included View paths: " + "; ".join(m.depot for m in view if m.modifier != '-'))
-            emit(self.p4, message)
-            raise DiscoveryMiss(message, role, requested)
+            candidates = []
+            route_error = str(exc)
+            emit(self.p4, f"Configured route could not be expanded for {label}: {exc}. Trying available model/AP/chipset hints in mapped subtrees.")
         records_by_path = {}
         queries = []
         self.attempts[f"{key}.{target}"] = queries
-        for candidate in candidates:
-            query = candidate.rstrip("/") + "/..." if directory else candidate
+
+        def query_files(query, mode):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or len(queries) >= max_queries:
+                message = f"{label}: discovery budget exhausted after {time.monotonic() - started:.1f}s / {len(queries)} queries (limits {seconds}s / {max_queries} queries). Last paths: " + '; '.join(queries) + ". Partial matches cannot establish a unique file; narrow the path with an override."
+                emit(self.p4, message)
+                raise PerforceSearchLimit(message)
             queries.append(query)
             if query not in self.cache:
-                emit(self.p4, f"Discovery query for {label}: {query}")
-                self.cache[query] = self.p4.files(query)
+                emit(self.p4, f"{mode} discovery query for {label}: {query}; remaining={remaining:.1f}s; result cap={max_records}.")
+                if hasattr(self.p4, 'bounded_files'):
+                    records = self.p4.bounded_files(query, timeout_seconds=remaining, max_records=max_records)
+                else:
+                    records = self.p4.files(query)
+                if len(records) > max_records or time.monotonic() > deadline:
+                    raise PerforceSearchLimit(f"{label}: discovery time/result limit exceeded for {query}; partial results were not used.")
+                self.cache[query] = records
             else:
                 emit(self.p4, f"Discovery cache reused for {label}: {query}")
             emit(self.p4, f"Discovery returned {len(self.cache[query])} live file(s): {query}")
+            accepted = []
             for record in self.cache[query]:
+                if time.monotonic() >= deadline:
+                    raise PerforceSearchLimit(f"{label}: discovery time budget exhausted while filtering {query}; partial results were not used.")
                 path = record["depotFile"]
                 try:
                     relative_for(view, path)
                 except MappingError as exc:
                     emit(self.p4, f"Discovery file rejected: {path}; {exc}")
                     continue
-                records_by_path[path] = record
-                emit(self.p4, f"Discovery matched {label}: {path}#{record.get('rev', '?')} ({record.get('type', 'unknown type')})")
+                accepted.append(record)
+            return accepted
+
+        for candidate in candidates:
+            query = candidate.rstrip("/") + "/..." if directory else candidate
+            for record in query_files(query, 'Configured route'):
+                records_by_path[record['depotFile']] = record
+
+        if not explicit and (not records_by_path or (target == 'hcf' and not any(path.lower().endswith('.hcf') for path in records_by_path))):
+            emit(self.p4, f"Configured routes did not locate eligible {target} files for {label}; starting bounded keyword fallback from relevant included View prefixes.")
+            fallback = search_queries(view, scope, target, self.config)
+            expected_names = []
+            routes = self.path_rules.get(scope, {}).get(target, [])
+            for route in ([routes] if isinstance(routes, dict) else routes):
+                leaf = route.get('relative', '').rsplit('/', 1)[-1]
+                for name, value in self.config.items():
+                    if isinstance(value, str):
+                        leaf = leaf.replace('{' + name + '}', value)
+                expected_names.append(leaf)
+            ranked = {}
+            for query in fallback:
+                if query in queries:
+                    continue
+                for record in query_files(query, 'Fallback'):
+                    if time.monotonic() >= deadline:
+                        raise PerforceSearchLimit(f"{label}: discovery time budget exhausted while ranking {query}; partial matches were not used.")
+                    path = record['depotFile']
+                    match = match_record(path, scope, target, self.config, expected_names)
+                    if match is None:
+                        emit(self.p4, f"Fallback rejected file-role/model/AP/chipset mismatch for {label}: {path}")
+                        continue
+                    score, group = match
+                    ranked[path] = (score, group, record)
+                    emit(self.p4, f"Fallback candidate for {label}: {path}#{record.get('rev', '?')}; evidence score={score}; group={group}.")
+            if ranked:
+                highest = max(value[0] for value in ranked.values())
+                best = [value for value in ranked.values() if value[0] == highest]
+                groups = {value[1] for value in best} if directory else {value[2]['depotFile'] for value in best}
+                if len(groups) != 1:
+                    choices = '; '.join(sorted(value[2]['depotFile'] for value in best))
+                    raise MappingError(f"{label}: bounded fallback found ambiguous equally relevant matches: {choices}. Set paths['{key}.{target}'] explicitly; no file was selected.")
+                chosen = next(iter(groups))
+                records_by_path = {path: value[2] for path, value in ranked.items()
+                                   if (value[1] if directory else path) == chosen}
+                emit(self.p4, f"Fallback selected {label}: {chosen}; unique strongest file-role/model/AP/chipset evidence, within the effective View.")
+            emit(self.p4, f"Fallback completed for {label}: {len(fallback)} planned query(s), {len(ranked)} eligible candidate file(s), elapsed={time.monotonic() - started:.1f}s.")
+        if time.monotonic() >= deadline:
+            raise PerforceSearchLimit(f"{label}: discovery time budget exhausted before completing lookup; partial matches were not used.")
+        for path, record in records_by_path.items():
+            emit(self.p4, f"Discovery matched {label}: {path}#{record.get('rev', '?')} ({record.get('type', 'unknown type')})")
         records = list(records_by_path.values())
         if not records:
-            message = (f"{label}: couldn't find an eligible live file. Exact path(s) searched: " + "; ".join(queries) +
-                       ". No returned live file was accepted by the effective template View. "
-                       "Check spelling, filename, head deletion, and View exclusions; the tool does not guess another branch.")
+            routes = self.path_rules.get(scope, {}).get(target, [])
+            requested = []
+            for route in ([routes] if isinstance(routes, dict) else routes):
+                hint = route.get('anchor', '') + route.get('relative', '')
+                for name, value in self.config.items():
+                    if isinstance(value, str):
+                        hint = hint.replace('{' + name + '}', value)
+                requested.append(hint)
+            message = (f"{label}: couldn't find an eligible live file after configured-route and bounded keyword discovery. Exact path(s) searched: " + ("; ".join(queries) or 'none') +
+                       ". Configured hints: " + '; '.join(requested) + ('. Route input error: ' + route_error if route_error else '') +
+                       (". No p4 files query was made: no relevant included View prefix was reachable; server-side absence is not established." if not queries else
+                        ". No queried live file matched the required role/model/AP/chipset within the effective View; this is not a depot-wide absence claim.") +
+                       f" Search limits: {seconds}s, {max_queries} queries, {max_records} records/query. Set paths['{key}.{target}'] to an exact mapped path if the naming keywords differ.")
             emit(self.p4, message)
             if not optional:
                 raise DiscoveryMiss(message, role, queries)
@@ -166,6 +234,22 @@ class Resolver:
     def counterpart(self, source, scope):
         relative = relative_for(self.views[f"reference.{scope}"], source)
         return translate_path(self.views[f"current.{scope}"], relative)
+
+    def directory_root(self, role, scope, target, records):
+        """Recover the selected physical folder without another Perforce call."""
+        explicit = self.override(role, scope, target)
+        if explicit:
+            return explicit.rstrip('/')
+        view = self.views[f'{role}.{scope}']
+        candidates = self._route_candidates(scope, target, view, True)
+        covered = {root for root in candidates if all(record['depotFile'].startswith(root + '/') for record in records)}
+        if len(covered) == 1:
+            return covered.pop()
+        matched = [match_record(record['depotFile'], scope, target, self.config) for record in records]
+        groups = {value[1] for value in matched if value}
+        if len(groups) != 1 or any(value is None for value in matched):
+            raise MappingError(f'{role}.{scope}.{target}: cannot identify one folder containing the discovered files; set an exact path override')
+        return groups.pop()
 
     def blank_target(self, scope, target):
         """Resolve a file destination from View routes without reading current files."""

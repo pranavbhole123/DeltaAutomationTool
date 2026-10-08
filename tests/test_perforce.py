@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from bt_delta.perforce import (
-    MappingError, P4CLI, PerforceError, WriteDisabledError,
+    MappingError, P4CLI, PerforceError, PerforceSearchLimit, WriteDisabledError,
     depot_roots, parse_view, translate_path, validate_depot_path,
 )
 
@@ -66,6 +66,25 @@ class P4CLITests(unittest.TestCase):
                                        stat(depotFile="//depot/c", rev="2", action="move/delete"))
         self.assertEqual([record["depotFile"] for record in self.p4.files("//depot/...")],
                          ["//depot/a"])
+
+    def test_bounded_discovery_uses_case_insensitive_live_records_limit_and_remaining_timeout(self):
+        self.run.return_value = result(stat(depotFile='//depot/EXYNOS12/manifest.xml', rev='2', action='edit'))
+        found = self.p4.bounded_files('//depot/EXYNOS12/*manifest*.xml', timeout_seconds=2.5, max_records=10)
+        self.assertEqual(found[0]['rev'], '2')
+        self.assertEqual(self.run.call_args.args[0][-6:], ['files', '-i', '-e', '-m', '11', '//depot/EXYNOS12/*manifest*.xml'])
+        self.assertEqual(self.run.call_args.kwargs['timeout'], 2.5)
+        self.assertFalse(self.p4.writes_enabled)
+
+    def test_bounded_discovery_rejects_truncated_candidates(self):
+        self.run.return_value = result(stat(depotFile='//depot/a', rev='1', action='add'),
+                                       stat(depotFile='//depot/b', rev='1', action='add'))
+        with self.assertRaisesRegex(PerforceSearchLimit, 'Partial results were not used'):
+            self.p4.bounded_files('//depot/...', timeout_seconds=3, max_records=1)
+
+    def test_bounded_discovery_cannot_extend_configured_transport_timeout(self):
+        self.run.return_value = result(error(17))
+        self.assertEqual(self.p4.bounded_files('//depot/...', timeout_seconds=50, max_records=10), [])
+        self.assertEqual(self.run.call_args.kwargs['timeout'], 30)
 
     def test_ev_empty_is_recognized_for_discovery_only(self):
         self.run.return_value = result(error(17), returncode=1)

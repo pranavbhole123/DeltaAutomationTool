@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 
 from .config import validate
@@ -31,6 +32,19 @@ class DemoP4:
         regex = pattern_regex(pattern)
         return [{"depotFile": path, "rev": str(v[0]), "type": v[2], "action": "add"}
                 for path, v in self.data.items() if regex.fullmatch(path)]
+
+    def bounded_files(self, pattern, *, timeout_seconds, max_records):
+        from .perforce import PerforceSearchLimit
+        # Preserve monkeypatched files() behavior used by server/error tests.
+        if 'files' in self.__dict__:
+            records = self.files(pattern)
+        else:
+            regex = re.compile(pattern_regex(pattern).pattern, re.I)
+            records = [{"depotFile": path, "rev": str(v[0]), "type": v[2], "action": "add"}
+                       for path, v in self.data.items() if regex.fullmatch(path)]
+        if len(records) > max_records:
+            raise PerforceSearchLimit('Synthetic discovery result limit exceeded: ' + pattern)
+        return records
 
     def read_file(self, path, revision=None):
         row = self.data[path]

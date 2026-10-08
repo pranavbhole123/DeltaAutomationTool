@@ -77,6 +77,16 @@ def validate(config: dict) -> dict:
     if config.get("firmware_sha256") and not re.fullmatch(r"[0-9a-fA-F]{64}", config["firmware_sha256"]):
         raise ConfigError("firmware_sha256 must be a 64-digit SHA-256")
     config.setdefault("paths", {})
+    discovery = config.setdefault("discovery", {})
+    if not isinstance(discovery, dict):
+        raise ConfigError("discovery must be an object")
+    for key, default, maximum in (("timeout_seconds", 30, 300), ("max_queries", 24, 100), ("max_records", 2000, 100000)):
+        discovery.setdefault(key, default)
+        value = discovery[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= maximum:
+            raise ConfigError(f"discovery.{key} must be greater than zero and at most {maximum}")
+        if key != "timeout_seconds" and not isinstance(value, int):
+            raise ConfigError(f"discovery.{key} must be an integer")
     return config
 
 

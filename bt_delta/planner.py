@@ -388,8 +388,21 @@ class Planner:
                 self.result(rule, "skipped", "Absent in reference; conditional copy does not apply.")
                 return
             sources = [r["depotFile"] for r in source] if isinstance(source, list) else [source]
+            existing = self.resolver.discover('current', scope, target, optional=True)
+            current_folder = None
+            if isinstance(existing, list) and existing:
+                current_folder = self.resolver.directory_root('current', scope, target, existing)
+            source_folder = self.resolver.directory_root('reference', scope, target, source) if current_folder else None
             for src in sources:
-                dst = self.resolver.counterpart(src, scope)
+                if isinstance(existing, str):
+                    dst = existing
+                    self.log(f"{rule['id']}: existing current file found by logical role: {dst}; compare it instead of adding a file at the reference filename.")
+                elif current_folder:
+                    dst = current_folder + src[len(source_folder):]
+                    relative_for(self.resolver.views[f'current.{scope}'], dst)
+                    self.log(f"{rule['id']}: mapped reference subpath into discovered current Bluetooth folder: {dst}")
+                else:
+                    dst = self.resolver.counterpart(src, scope)
                 self.rule_paths.append(dst)
                 source_snapshot = self.snapshot(src)
                 target_snapshot = self.snapshot(dst, optional=True)
@@ -583,6 +596,10 @@ class Planner:
         for path in hcf:
             self.snapshot(path)
         self.rule_paths.extend(hcf)
+        if not any('/' + selected['variant'] + '/' in path for path in hcf):
+            self.result(rule, 'review', f"Reference HCF search found files, but none is under the folder {selected['variant']} selected by reference bluetooth.mk. "
+                        "The found paths are listed below. No filter is proposed that points at an absent folder; confirm the model/variant or fix the reference filter.", [reference_mk, *hcf])
+            return None
         return reference_mk, selected
 
     def verify_hcf(self, rule):
@@ -618,6 +635,11 @@ class Planner:
             return
         for path in hcf:
             self.snapshot(path)
+        if not any('/' + variant + '/' in path for path in hcf):
+            self.result(rule, 'review', f"Current HCF search found files at another model folder, but the reference filter uses {variant}. "
+                        "Found paths are listed below. No duplicate/missing-folder filter was added; review the variant and TARGET_PRODUCT mapping against the reference.",
+                        [reference_mk, current_mk, *hcf])
+            return
         filter_changed = self.propose(current_mk, updated_mk.encode(current_encoding), rule)
         evidence = ("Resolved HCF folder: " + variant +
                     "; TARGET_PRODUCT values: " + " ".join(selected["products"]) +

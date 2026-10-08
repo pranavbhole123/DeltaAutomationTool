@@ -666,7 +666,7 @@ class WorkflowTests(unittest.TestCase):
         resolver = Resolver(self.p4, self.config)
         queries = []
         self.p4.files = lambda pattern: queries.append(pattern) or []
-        with self.assertRaisesRegex(MappingError, 'no configured anchor route'):
+        with self.assertRaisesRegex(MappingError, 'no relevant included View prefix'):
             resolver.discover('reference', 'system', 'board_config')
         self.assertEqual(queries, [])
 

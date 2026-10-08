@@ -41,6 +41,10 @@ class PerforceTimeout(PerforceError):
     """Stop planning when the server does not answer within the request limit."""
 
 
+class PerforceSearchLimit(PerforceError):
+    """A discovery budget was exhausted; partial results cannot select a file."""
+
+
 class WriteDisabledError(PerforceError):
     """An operation attempted to mutate a read-only adapter."""
 
@@ -131,12 +135,16 @@ class P4CLI:
         allow_empty: bool = False,
         input_record: Mapping[str, str] | None = None,
         binary_data: bool = False,
+        timeout_seconds: float | None = None,
     ) -> list[dict[str, Any]]:
         argv = [self.executable, "-G", "-p", self.port, "-u", self.user, "-c", self.client,
                 command, *arguments]
+        timeout = min(self.timeout_seconds, timeout_seconds) if timeout_seconds is not None else self.timeout_seconds
+        if timeout <= 0:
+            raise PerforceSearchLimit("Discovery time budget was exhausted before querying Perforce")
         kwargs: dict[str, Any] = {
             "stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
-            "timeout": self.timeout_seconds, "check": False, "shell": False,
+            "timeout": timeout, "check": False, "shell": False,
         }
         if input_record is None:
             kwargs["stdin"] = subprocess.DEVNULL
@@ -145,13 +153,13 @@ class P4CLI:
                        for key, value in input_record.items()}
             kwargs["input"] = marshal.dumps(encoded, 0)
         label = "p4 " + " ".join([command, *arguments])
-        self._report(f"Running ({self.timeout_seconds:g}s timeout): {label}")
+        self._report(f"Running ({timeout:g}s timeout): {label}")
         started = time.monotonic()
         try:
             completed = subprocess.run(argv, **kwargs)
         except subprocess.TimeoutExpired as exc:
-            self._report(f"TIMEOUT after {self.timeout_seconds:g}s: {label}")
-            raise PerforceTimeout(f"Timed out after {self.timeout_seconds:g}s: {label}. Check server/VPN connectivity or narrow the path using an override.") from exc
+            self._report(f"TIMEOUT after {timeout:g}s: {label}")
+            raise PerforceTimeout(f"Timed out after {timeout:g}s: {label}. Check server/VPN connectivity or narrow the path using an override.") from exc
         except OSError as exc:
             raise PerforceError(f"p4 {command} could not complete: {exc}") from exc
         self._report(f"Returned in {time.monotonic() - started:.1f}s (exit {completed.returncode}): {label}")
@@ -216,9 +224,19 @@ class P4CLI:
         pattern = validate_depot_path(pattern, allow_wildcards=True)
         return self._file_records(pattern)
 
-    def _file_records(self, pattern):
-        response = self._run("files", pattern, allow_empty=True)
+    def bounded_files(self, pattern, *, timeout_seconds, max_records):
+        """Case-insensitive discovery with a deadline and truncation detection."""
+        pattern = validate_depot_path(pattern, allow_wildcards=True)
+        if isinstance(max_records, bool) or not isinstance(max_records, int) or max_records <= 0:
+            raise ValueError("max_records must be a positive integer")
+        return self._file_records(pattern, timeout_seconds=timeout_seconds, max_records=max_records)
+
+    def _file_records(self, pattern, *, timeout_seconds=None, max_records=None):
+        arguments = ("-i", "-e", "-m", str(max_records + 1), pattern) if max_records is not None else (pattern,)
+        response = self._run("files", *arguments, allow_empty=True, timeout_seconds=timeout_seconds)
         records = self._stats(response)
+        if max_records is not None and len(records) > max_records:
+            raise PerforceSearchLimit(f"Discovery result limit exceeded for {pattern}: more than {max_records} files. Partial results were not used; narrow the path or raise discovery.max_records.")
         if not records and not any(str(record.get("generic")) == str(EV_EMPTY) for record in response):
             raise PerforceError(f"p4 files returned no file or EV_EMPTY record for {pattern}")
         live = [record for record in records
