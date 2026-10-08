@@ -111,6 +111,7 @@ class Resolver:
         started = time.monotonic()
         deadline = started + seconds
         explicit = self.override(role, scope, target)
+        exact_hcf = bool(target == 'hcf' and explicit and explicit.rstrip('/').lower().endswith('.hcf'))
         route_error = ''
         try:
             candidates = ([validate_depot_path(explicit.rstrip("/"))] if explicit
@@ -158,7 +159,9 @@ class Resolver:
             return accepted
 
         for candidate in candidates:
-            query = candidate.rstrip("/") + "/..." if directory else candidate
+            query = candidate.rstrip("/") + "/..." if directory and not exact_hcf else candidate
+            if explicit:
+                emit(self.p4, f"Exact override used for {label}: {query}; no anchor or keyword substitution.")
             for record in query_files(query, 'Configured route'):
                 records_by_path[record['depotFile']] = record
 
@@ -239,6 +242,8 @@ class Resolver:
         """Recover the selected physical folder without another Perforce call."""
         explicit = self.override(role, scope, target)
         if explicit:
+            if target == 'hcf' and explicit.rstrip('/').lower().endswith('.hcf'):
+                return explicit.rstrip('/').rsplit('/', 1)[0]
             return explicit.rstrip('/')
         view = self.views[f'{role}.{scope}']
         candidates = self._route_candidates(scope, target, view, True)

@@ -196,6 +196,26 @@ class DiscoveryTests(unittest.TestCase):
         found = Resolver(self.p4, self.config).discover('current', 'vendor', 'hcf')
         self.assertEqual([record['depotFile'] for record in found], [new])
 
+    def test_exact_hcf_file_override_is_queried_as_a_file(self):
+        old = self.path('current', '/bt.hcf')
+        exact = self.move(old, old.replace('/m36xxx/bt.hcf', '/m36xnsxx/mx140_bt.hcf'))
+        self.config['paths']['current.vendor.hcf'] = exact
+        resolver = Resolver(self.p4, self.config)
+        records = resolver.discover('current', 'vendor', 'hcf')
+        self.assertEqual([record['depotFile'] for record in records], [exact])
+        self.assertEqual(resolver.attempts['current.vendor.hcf'], [exact])
+        self.assertEqual(resolver.directory_root('current', 'vendor', 'hcf', records), exact.rsplit('/', 1)[0])
+        self.assertTrue(any('Exact override used' in line and exact in line for line in self.messages))
+
+    def test_missing_exact_hcf_override_does_not_search_another_file(self):
+        existing = self.path('reference', '/bt.hcf')
+        missing = existing.replace('/bt.hcf', '/mx140_bt.hcf')
+        self.config['paths']['reference.vendor.hcf'] = missing
+        resolver = Resolver(self.p4, self.config)
+        with self.assertRaises(DiscoveryMiss):
+            resolver.discover('reference', 'vendor', 'hcf')
+        self.assertEqual(resolver.attempts['reference.vendor.hcf'], [missing])
+
     def test_hcf_other_model_or_chipset_is_not_selected(self):
         old = self.path('current', '/bt.hcf')
         del self.p4.data[old]

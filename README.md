@@ -103,7 +103,7 @@ Ambiguous file matches are blocked and listed. Use the **exact depot overrides**
 }
 ```
 
-Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
+Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. An `hcf` override also accepts an exact `.hcf` file path; it is queried literally, without appending `/...`. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
 
 `common_device` may be set in JSON when it differs from `<model>_common`. AP and model folder names can also be specified. Unsupported/ambiguous view syntax stops resolution rather than guessing.
 
