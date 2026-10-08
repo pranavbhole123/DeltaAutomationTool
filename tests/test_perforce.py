@@ -67,13 +67,25 @@ class P4CLITests(unittest.TestCase):
         self.assertEqual([record["depotFile"] for record in self.p4.files("//depot/...")],
                          ["//depot/a"])
 
-    def test_bounded_discovery_uses_case_insensitive_live_records_limit_and_remaining_timeout(self):
+    def test_bounded_discovery_uses_simple_inventory_limit_and_remaining_timeout(self):
         self.run.return_value = result(stat(depotFile='//depot/EXYNOS12/manifest.xml', rev='2', action='edit'))
-        found = self.p4.bounded_files('//depot/EXYNOS12/*manifest*.xml', timeout_seconds=2.5, max_records=10)
+        found = self.p4.bounded_files('//depot/EXYNOS12/...', timeout_seconds=2.5, max_records=10)
         self.assertEqual(found[0]['rev'], '2')
-        self.assertEqual(self.run.call_args.args[0][-6:], ['files', '-i', '-e', '-m', '11', '//depot/EXYNOS12/*manifest*.xml'])
+        self.assertEqual(self.run.call_args.args[0][-5:], ['files', '-e', '-m', '11', '//depot/EXYNOS12/...'])
+        self.assertNotIn('-i', self.run.call_args.args[0])
         self.assertEqual(self.run.call_args.kwargs['timeout'], 2.5)
         self.assertFalse(self.p4.writes_enabled)
+
+    def test_bounded_discovery_rejects_combined_wildcards_before_query(self):
+        for pattern in ('//depot/.../*board*config*.mk', '//depot/*/manifest*.xml'):
+            with self.subTest(pattern=pattern), self.assertRaisesRegex(ValueError, 'at most one wildcard'):
+                self.p4.bounded_files(pattern, timeout_seconds=3, max_records=10)
+        self.run.assert_not_called()
+
+    def test_exact_discovery_does_not_expand_case_on_the_server(self):
+        self.run.return_value = result(stat(depotFile='//depot/BoardConfigCommon.mk', rev='1', action='add'))
+        self.p4.bounded_files('//depot/BoardConfigCommon.mk', timeout_seconds=3, max_records=10)
+        self.assertEqual(self.run.call_args.args[0][-5:], ['files', '-e', '-m', '11', '//depot/BoardConfigCommon.mk'])
 
     def test_bounded_discovery_rejects_truncated_candidates(self):
         self.run.return_value = result(stat(depotFile='//depot/a', rev='1', action='add'),

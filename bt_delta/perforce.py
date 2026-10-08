@@ -225,14 +225,16 @@ class P4CLI:
         return self._file_records(pattern)
 
     def bounded_files(self, pattern, *, timeout_seconds, max_records):
-        """Case-insensitive discovery with a deadline and truncation detection."""
+        """Exact or single-wildcard inventory with a deadline and result cap."""
         pattern = validate_depot_path(pattern, allow_wildcards=True)
+        if len(re.findall(r'\.\.\.|\*', pattern)) > 1:
+            raise ValueError("Bounded discovery accepts at most one wildcard; filter filenames locally")
         if isinstance(max_records, bool) or not isinstance(max_records, int) or max_records <= 0:
             raise ValueError("max_records must be a positive integer")
         return self._file_records(pattern, timeout_seconds=timeout_seconds, max_records=max_records)
 
     def _file_records(self, pattern, *, timeout_seconds=None, max_records=None):
-        arguments = ("-i", "-e", "-m", str(max_records + 1), pattern) if max_records is not None else (pattern,)
+        arguments = ("-e", "-m", str(max_records + 1), pattern) if max_records is not None else (pattern,)
         response = self._run("files", *arguments, allow_empty=True, timeout_seconds=timeout_seconds)
         records = self._stats(response)
         if max_records is not None and len(records) > max_records:

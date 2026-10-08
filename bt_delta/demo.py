@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import re
 from pathlib import Path
 
 from .config import validate
@@ -39,7 +38,7 @@ class DemoP4:
         if 'files' in self.__dict__:
             records = self.files(pattern)
         else:
-            regex = re.compile(pattern_regex(pattern).pattern, re.I)
+            regex = pattern_regex(pattern)
             records = [{"depotFile": path, "rev": str(v[0]), "type": v[2], "action": "add"}
                        for path, v in self.data.items() if regex.fullmatch(path)]
         if len(records) > max_records:

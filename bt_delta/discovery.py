@@ -4,25 +4,13 @@ import re
 
 MODEL_TARGETS = {'board_config', 'device_common', 'model_init', 'sec_product', 'bluetooth_header', 'bluetooth_folder'}
 VERSION_SUFFIX = r'(?:[._-]?\d+(?:[._-]\d+)*)?'
-GLOBS = {
-    'board_config': ['*board*config*.mk'],
-    'device_common': ['*device*.mk'],
-    'model_init': ['init*.rc'],
-    'sec_product': ['*product*feature*'],
-    'bluetooth_header': ['*.h'],
-    'bluetooth_folder': ['...'],
-    'root_init': ['init*.rc'],
-    'manifest': ['*manifest*.xml', '*vintf*.xml'],
-    'hcf_makefile': ['*bluetooth*.mk', '*bt*.mk'],
-    'hcf': ['*.hcf'],
-    'firmware': ['*.bin', '*.fw'],
-}
+VERSIONED_ANCHORS = {'exynos', 'essi'}
 
 
 def anchor_matches(anchor, path):
     """Accept arbitrary numeric platform versions, e.g. EXYNOS8825 or EXYNOS12_3."""
     components = anchor.strip('/').split('/')
-    pattern = '/' + '/'.join(re.escape(part) + (VERSION_SUFFIX if part.isalpha() else '') for part in components) + '/'
+    pattern = '/' + '/'.join(re.escape(part) + (VERSION_SUFFIX if part.lower() in VERSIONED_ANCHORS else '') for part in components) + '/'
     return list(re.finditer(pattern, path, re.I))
 
 
@@ -111,16 +99,11 @@ def search_queries(view, scope, target, config):
         root = static.rstrip('/') if wildcard and static.endswith('/') else static.rsplit('/', 1)[0]
         if not _context(root, scope, target, config, root=True):
             continue
-        # Never climb above this included mapping's fixed prefix.
-        query_root = static.rstrip('/') if wildcard and static.endswith('/') else None
-        queries = [mapping.depot] if query_root is None else []
-        if query_root is not None:
-            for glob in GLOBS.get(target, []):
-                queries.append(query_root + '/' + glob)
-                if glob != '...':
-                    queries.append(query_root + '/.../' + glob)
-        for query in queries:
-            roots[query] = max(roots.get(query, 0), len(root.split('/')))
+        # One recursive inventory wildcard only. Filename and role matching are
+        # local: combining recursive and filename globs can exceed server maps.
+        # A partial filename prefix is not a directory, so start at its parent.
+        query = root + '/...' if wildcard else mapping.depot
+        roots[query] = max(roots.get(query, 0), len(root.split('/')))
     return [query for query, _ in sorted(roots.items(), key=lambda item: (-item[1], item[0]))]
 
 

@@ -8,7 +8,8 @@ from unittest.mock import patch
 from bt_delta.blank import BlankPlanner
 from bt_delta.config import ConfigError, validate
 from bt_delta.demo import fixture
-from bt_delta.perforce import MappingError, PerforceSearchLimit
+from bt_delta.discovery import anchor_matches
+from bt_delta.perforce import MappingError, PerforceError, PerforceSearchLimit
 from bt_delta.planner import Planner
 from bt_delta.resolver import DiscoveryMiss, Resolver
 
@@ -54,6 +55,27 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertIn('/' + version + '/android/', found)
                 self.assertEqual(resolver.attempts['current.vendor.manifest'], [found])
         self.assertTrue(any('Anchor variant accepted' in line for line in self.messages))
+
+    def test_numeric_versions_only_apply_to_platform_anchors(self):
+        self.assertTrue(anchor_matches('/EXYNOS/', '//depot/EXYNOS8825/android/'))
+        self.assertFalse(anchor_matches('/VENDOR/Cinnamon/vendor/', '//depot/VENDOR2/Cinnamon3/vendor4/'))
+
+    def test_planning_works_when_server_rejects_combined_wildcards(self):
+        original = self.p4.bounded_files
+        queries = []
+        def simple_queries_only(pattern, **limits):
+            queries.append(pattern)
+            if pattern.count('...') + pattern.count('*') > 1:
+                raise PerforceError('p4 files failed: Excessive combinations of wildcards in path and maps.')
+            return original(pattern, **limits)
+        self.p4.bounded_files = simple_queries_only
+        board = self.path('reference', '/BoardConfigCommon.mk', True)
+        renamed = self.move(board, board.replace('BoardConfigCommon.mk', 'BoardVendorConfigCommon.mk'))
+        plan = Planner(self.p4, self.config).build()
+        self.assertTrue(queries)
+        self.assertTrue(any(renamed in check['paths'] for check in plan['checks']))
+        self.assertFalse(any(check['status'] == 'blocked' and 'Excessive combinations' in check['message'] for check in plan['checks']))
+        self.assertTrue(all('*' not in query and query.count('...') <= 1 for query in queries))
 
     def test_manifest_renamed_and_moved_below_exact_ap_mapping(self):
         self.version_platform('current', 'EXYNOS2')
