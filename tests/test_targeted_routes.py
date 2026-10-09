@@ -50,6 +50,29 @@ class TargetedRouteTests(unittest.TestCase):
                 resolver.discover('current', 'vendor', 'manifest')
         files.assert_not_called()
 
+    def test_manifest_uses_each_templates_own_mapped_ap_folder(self):
+        self.config.update(chipset='s5e8825', ap='universal8825')
+        manifests = {}
+        for role, branch, version, exynos, mapped_ap in (
+                ('current', 'COOSA', 'ONEUI_9_0/FLUMEN', 'EXYNOS2', 'erd8825'),
+                ('reference', 'BENI', 'ONEUI_8_5/ONEUI_8_5_MR202601', 'EXYNOS', 'universal8825')):
+            template = self.config[role]['vendor_template']
+            old_root = f'//{branch}/VENDOR/VENDOR/Strawberry/EXYNOS/android'
+            new_root = f'//{branch}/VENDOR/VENDOR/Strawberry/{exynos}/android/device/samsung/{mapped_ap}'
+            self.p4.specs[template]['View1'] = (
+                new_root + '/... //' + template + f'/android/vendor_platform/device/samsung/{mapped_ap}/...')
+            old_manifest = old_root + '/device/samsung/erd8835/manifest.xml'
+            manifest = new_root + '/manifest.xml'
+            self.p4.data[manifest] = self.p4.data.pop(old_manifest)
+            manifests[role] = manifest
+
+        resolver = Resolver(self.p4, self.config)
+        with patch.object(self.p4, 'files', wraps=self.p4.files) as files:
+            self.assertEqual(resolver.discover('reference', 'vendor', 'manifest'), manifests['reference'])
+            self.assertEqual(resolver.discover('current', 'vendor', 'manifest'), manifests['current'])
+        self.assertEqual([call.args[0] for call in files.call_args_list],
+                         [manifests['reference'], manifests['current']])
+
     def hardware_view(self, role, prefix):
         template = self.config[role]['vendor_template']
         self.p4.specs[template] = {

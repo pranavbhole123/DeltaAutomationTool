@@ -87,6 +87,26 @@ class Resolver:
                 if mapping.modifier == "-":
                     continue
                 static = re.split(r"\.\.\.|\*", mapping.depot, maxsplit=1)[0]
+                if target == "manifest":
+                    # The reference and current templates may map different AP
+                    # folders for the same chipset (for example universal8825
+                    # versus erd8825). Resolve that folder independently from
+                    # each template View and keep the Perforce query literal.
+                    manifest_root = re.search(
+                        r"/EXYNOS[0-9]*/android/device/samsung/([^/]+)/$", static)
+                    if manifest_root:
+                        mapped_ap = manifest_root.group(1)
+                        number_parts = re.findall(r"\d+", self.config.get("chipset", ""))
+                        digits = number_parts[-1] if number_parts else ""
+                        expected = {str(self.config.get("ap") or "").lower()}
+                        if digits:
+                            expected.update((f"erd{digits}", f"universal{digits}"))
+                        if mapped_ap.lower() in expected:
+                            candidate = static + "manifest.xml"
+                            if pattern_regex(mapping.depot).fullmatch(candidate):
+                                candidates.add(candidate)
+                                emit(self.p4, f"Manifest route uses template-mapped AP {mapped_ap}: {candidate}")
+                        continue
                 # Only EXYNOS gains an optional numeric suffix. Preserve the
                 # actual mapped spelling; never send this regex to Perforce.
                 anchor_pattern = re.escape(anchor).replace("/EXYNOS/", r"/EXYNOS[0-9]*/")
