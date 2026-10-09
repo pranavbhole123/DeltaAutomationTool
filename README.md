@@ -18,7 +18,7 @@ Try **Offline demo** to inspect the interface without credentials. Demo data is 
 
 ## Command line
 
-The GUI opens a **Live log** tab while working. It shows each Perforce request and its duration. Both GUI and CLI append diagnostics to `new/runtime.log`. Requests time out after 30 seconds by default; a request timeout stops remaining planning checks. JSON connection setting `perforce.timeout_seconds` can override this for a known slow server. File discovery also has a shared budget per lookup and searches relevant mapped subtrees using file-role and model keywords, as described below.
+The GUI opens a **Live log** tab while working. It shows each Perforce request and its duration. Both GUI and CLI append diagnostics to `new/runtime.log`. Requests time out after 30 seconds by default; a timeout stops remaining planning checks. JSON connection setting `timeout_seconds` can override this for a known slow server. File discovery uses target-path suffixes instead of scanning every matching basename in a branch.
 
 ```powershell
 python main.py demo --out reports/demo
@@ -68,7 +68,7 @@ CLI exit status is 2 for an incomplete comparison, 1 for an operation failure an
 
 ## How paths are resolved
 
-Configured routes are the first discovery hints, not the only permitted filenames or directory layout. Change or add hints in `checklist/slsi.json`:
+The Bluetooth header also uses only the mapped `EXYNOS/.../device/<common_device>/` folder. Change or add relative candidates in `checklist/slsi.json`:
 
 ```json
 "path_rules": {
@@ -81,17 +81,15 @@ Configured routes are the first discovery hints, not the only permitted filename
 }
 ```
 
-Anchor components accept numeric version suffixes: `/EXYNOS/` can resolve actual mapped `/EXYNOS2/`, `/EXYNOS10/`, `/EXYNOS8825/` or `/EXYNOS12_3/` paths, with no fixed list of versions. Numeric suffix matching is limited to platform anchors (`EXYNOS` and `ESSI`); other directory components stay literal. The actual depot prefix and casing come from the View. `{model}`, `{common_device}`, AP, chipset, firmware family and HCF variant help identify the intended file role.
+Each path is relative to the model-common folder. `{model}` and `{common_device}` placeholders are supported if needed in a future filename/subfolder. The branch and model folder come from the template View. Only these exact candidates are queried; no system/application fallback searches occur. If none exists in reference, the copy is skipped. If multiple candidates exist, select one with an exact path override. A missing current header is added from reference after approval; existing headers are compared without overwrite.
 
-When the configured route returns no eligible file, discovery searches the closest relevant included View prefixes, using one recursive `...` inventory wildcard per query. Filename keywords are filtered locally rather than combined with server-side wildcards. It uses role keywords for board configs, device makefiles, init files, product features, Bluetooth headers/folders, manifests, Bluetooth makefiles, HCF files and firmware binaries. Returned paths are checked against the effective View and model/AP/chipset context; unrelated models, APs, known firmware families, exclusions and competing matches are not accepted. Canonical names and matching model/family context provide stronger evidence; equally relevant alternatives require an exact override. Searches do not climb outside mapped subtrees or scan the whole server. Explicit overrides remain authoritative and are not silently replaced. Manifest searches resolve each template independently and accept `erd8825`/`universal8825` naming variants with the same numeric AP identity; different AP numbers remain excluded. HCF searches use relevant mapped vendor hardware roots regardless of release-tree names such as `Cinnamon` or `Common`. HCF and `bluetooth.mk` rules resolve `android/vendor/samsung/hardware/vendor/...` through the actual template View, with `/vendor/samsung/hardware/vendor/` as the depot-side anchor. Neither `Cinnamon` nor `Common` is required. Manifest rules also use the AP directory present in each template View for exact `manifest.xml` queries.
+`BoardConfigCommon.mk` is resolved only from included View lines under `EXYNOS/.../device/<common_device>/`. The resolver appends the filename to that mapped folder and makes an exact file query. It never searches ESSI system roots, Cinnamon applications, or unrelated common-device folders for BoardConfig. Missing mappings require an explicit path override instead of a broad fallback search.
 
 Paths in the spreadsheet are examples. The resolver reads each supplied template's actual `View` using `p4 client -o`, searches its mapped depot paths for logical checklist targets, and validates each candidate against effective mappings, including exclusions and ordered overrides. It does not construct COOSA/BENI paths by replacing depot names or copying template-name fragments.
 
-For example, a reference `android/device/samsung/m36x_common/Bluetooth/bdroid_buildcfg.h` can map under `//MODEL/PROD_BENI/ONEUI_8_5/...`, while the current template maps the same build path under `//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/...`. Each side is resolved independently. Existing headers found under a changed filename are compared rather than copied again under the reference filename. Existing Bluetooth folders discovered under a changed directory name retain that location and receive only missing reference subpaths. When no current counterpart exists, reference copies translate through the build path into the current view.
+For example, a reference `android/device/samsung/m36x_common/Bluetooth/bdroid_buildcfg.h` can map under `//MODEL/PROD_BENI/ONEUI_8_5/...`, while the current template maps the same build path under `//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/...`. Each side is resolved independently. Reference file copies translate through that build path into the current view.
 
-Each logical lookup has a shared time budget (default 30 seconds), at most 24 queries and a result cap of 2000 records per query. The remaining time also caps each Perforce request. Configure these limits in saved inputs, for example `"discovery": {"timeout_seconds": 30, "max_queries": 24, "max_records": 2000}`. Queries preserve the View's literal path casing and omit server-side `-i` expansion; local filename matching ignores case. Fallback uses live-file inventory queries with [Perforce file-listing limits](https://help.perforce.com/helix-core/server-apps/cmdref/2025.2/Content/CmdRef/p4_files.html). Limit exhaustion is an incomplete search, not file absence; partial candidates are never used to select a file. Logs include configured routes, accepted anchor versions, exact queries, remaining time, caps, returned counts, rejected candidates and selection evidence. Missing-file reports list attempted searches rather than dumping hundreds of unrelated View entries.
-
-HCF checks inspect only current-template file inventory, accepting `.hcf` filenames such as `mx140_bt.hcf`. HCF binaries are never read or copied, and reference `.hcf` files are not required or queried. For a current HCF model folder such as `s5e8835/a35xxx`, the tool queries `s5e8835/bluetooth.mk` exactly. The reference Makefile is resolved through its template View and still supplies the TARGET_PRODUCT filter comparison. If that filter points to another model folder, the current HCF paths are reported for review and no filter pointing at an absent folder is proposed. HCF files and firmware binaries (`.bin`/`.fw`) remain separate file roles.
+EXYNOS anchors also accept a numeric suffix (`EXYNOS2`, `EXYNOS12`, and so on). This matching happens locally against template View paths; Perforce receives literal paths. HCF and `bluetooth.mk` use the shared `vendor/samsung/hardware/vendor` path, so neither requires a `Cinnamon` depot folder. HCF discovery lists only the selected chipset directory with one `/...` query and filters model-prefixed folders locally (for example, `m34xnsxx` for `m34x`). Ordinary file lookups keep their original exact routes and request timeout; there are no broad fallback searches or additional discovery budgets.
 
 Ambiguous file matches are blocked and listed. Use the **exact depot overrides** JSON field to select a candidate, for example:
 
@@ -103,7 +101,7 @@ Ambiguous file matches are blocked and listed. Use the **exact depot overrides**
 }
 ```
 
-Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. An `hcf` override also accepts an exact `.hcf` file path; it is queried literally, without appending `/...`. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
+Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
 
 `common_device` may be set in JSON when it differs from `<model>_common`. AP and model folder names can also be specified. Unsupported/ambiguous view syntax stops resolution rather than guessing.
 

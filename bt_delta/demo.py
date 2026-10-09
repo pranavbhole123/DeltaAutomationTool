@@ -32,19 +32,6 @@ class DemoP4:
         return [{"depotFile": path, "rev": str(v[0]), "type": v[2], "action": "add"}
                 for path, v in self.data.items() if regex.fullmatch(path)]
 
-    def bounded_files(self, pattern, *, timeout_seconds, max_records):
-        from .perforce import PerforceSearchLimit
-        # Preserve monkeypatched files() behavior used by server/error tests.
-        if 'files' in self.__dict__:
-            records = self.files(pattern)
-        else:
-            regex = pattern_regex(pattern)
-            records = [{"depotFile": path, "rev": str(v[0]), "type": v[2], "action": "add"}
-                       for path, v in self.data.items() if regex.fullmatch(path)]
-        if len(records) > max_records:
-            raise PerforceSearchLimit('Synthetic discovery result limit exceeded: ' + pattern)
-        return records
-
     def read_file(self, path, revision=None):
         row = self.data[path]
         if revision is not None and int(revision) != row[0]:

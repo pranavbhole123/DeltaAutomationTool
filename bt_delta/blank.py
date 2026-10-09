@@ -148,14 +148,11 @@ class BlankPlanner(Planner):
                                  file_type=snapshot["type"], reference_path=src)
             return
         if kind == "verify_hcf":
-            current = self.current_hcf(rule)
-            if current is None:
-                return
-            path, hcf = current
-            source = self.reference_hcf(rule, path)
+            source = self.reference_hcf(rule)
             if source is None:
                 return
             src, selected = source
+            path = self.resolver.blank_target(scope, "hcf_makefile")
             self.rule_paths.append(path)
             self.write_blank(path, selected["text"] + "\n", rule, reference_path=src)
             return
