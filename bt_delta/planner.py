@@ -180,6 +180,10 @@ class Planner:
                 self.log(f"{rule['id']}: applied explicit JDM /efs selection to reference init commands.")
             self.log(f"{rule['id']}: reference-selected {action['type']}: " +
                      repr({key: value for key, value in action.items() if key in ('event', 'commands', 'packages', 'lines', 'keys')}))
+            for entry in action.get('conditional_packages', []):
+                conditions = ' -> '.join(code for guard in entry['guards'] for code, _ in guard['branches'])
+                self.log(f"{rule['id']}: selected conditional reference package(s) at line {entry['start'] + 1}: " +
+                         ', '.join(entry['packages']) + '; preserve condition(s): ' + conditions)
         if not actions:
             self.log(f"{rule['id']}: no matching reference actions; checklist defaults will not be inserted.")
         return actions

@@ -2,9 +2,9 @@
 import copy
 import re
 
-from .transforms import (TransformError, _ASSIGNMENT, _body, _command_key, _comment,
+from .transforms import (TransformError, _ASSIGNMENT, _append, _body, _command_key, _comment,
                          _init_stanza_ranges, _make_statements, _newline,
-                         _select_init_stanza, _tokens, transform)
+                         _presence, _select_init_stanza, _tokens, transform)
 
 
 def _patterns(values, label):
@@ -18,26 +18,89 @@ def _matches(patterns, value):
     return any(pattern.search(value) for pattern in patterns)
 
 
+def _package_entries(text):
+    """Record each package list together with its enclosing conditional branches."""
+    lines, stack = text.splitlines(keepends=True), []
+    for start, end, logical, _ in _make_statements(text):
+        code = logical.strip()
+        raw = ''.join(lines[start:end])
+        if re.match(r'^(?:ifeq|ifneq|ifdef|ifndef)(?:\s|\()', code) or re.match(r'^if(?:\s|\[|\()', code):
+            # Keep the explanatory comment immediately above the condition.
+            first = start
+            while first and lines[first - 1].lstrip().startswith('#'):
+                first -= 1
+            stack.append({'branches': [(code, ''.join(lines[first:end]))],
+                          'close': 'fi' if re.match(r'^if(?:\s|\[|\()', code) else 'endif'})
+        elif re.match(r'^(?:else|elif)(?:\s|$)', code):
+            stack[-1]['branches'].append((code, raw))
+        elif re.match(r'^(?:endif|fi)(?:\s|$)', code):
+            stack.pop()
+        else:
+            assignment = _ASSIGNMENT.match(logical)
+            if assignment and assignment['key'] == 'PRODUCT_PACKAGES':
+                yield {'start': start, 'assignment': assignment.groupdict(), 'text': raw,
+                       'guards': copy.deepcopy(stack),
+                       'context': tuple(tuple(' '.join(code.split()) for code, _ in frame['branches'])
+                                        for frame in stack)}
+
+
 def _reference_packages(text, action):
     patterns = _patterns(action.get("reference_package_patterns", []), "package")
     static = set(action.get("packages", []))
-    selected, conditional = [], set()
-    for _, _, logical, depth in _make_statements(text):
-        assignment = _ASSIGNMENT.match(logical)
-        if not assignment or assignment["key"] != "PRODUCT_PACKAGES":
+    selected, conditional = [], []
+    for entry in _package_entries(text):
+        tokens = entry['assignment']['value'].split()
+        packages = list(dict.fromkeys(token for token in tokens if token in static or _matches(patterns, token)))
+        if not packages:
             continue
-        for token in assignment["value"].split():
-            if token not in static and not _matches(patterns, token):
+        # Validate literal package names using the ordinary package transform.
+        transform('', {'type': 'make_packages', 'packages': packages})
+        if entry['guards']:
+            if entry['assignment']['operator'] != '+=':
+                raise TransformError('Conditional reference PRODUCT_PACKAGES must use += before copying selected packages')
+            entry['packages'] = packages
+            conditional.append(entry)
+        else:
+            selected.extend(token for token in packages if token not in selected)
+    return selected, conditional
+
+
+def _apply_conditional_packages(current, entries, *, report=None):
+    locations, added = {}, set()
+    for entry in _package_entries(current):
+        for token in entry['assignment']['value'].split():
+            locations.setdefault(token, []).append(entry)
+    for source in entries:
+        missing = []
+        for package in source['packages']:
+            if (package, source['context']) in added:
                 continue
-            if depth:
-                conditional.add(token)
-            elif token not in selected:
-                selected.append(token)
-    ambiguous = conditional - set(selected)
-    if ambiguous:
-        raise TransformError("Reference Bluetooth package is conditional; review before copying: " +
-                             ", ".join(sorted(ambiguous)))
-    return selected
+            found = locations.get(package, [])
+            if found:
+                matching = any(entry['context'] == source['context'] for entry in found)
+                _presence(report, f"Conditional package {package} already exists at line(s) " +
+                          ', '.join(str(entry['start'] + 1) for entry in found) + '. No duplicate added. ' +
+                          ('Its enclosing conditions match reference.' if matching else
+                           'Its enclosing conditions differ from reference; existing content is preserved for review.'),
+                          review=not matching)
+            else:
+                missing.append(package)
+                added.add((package, source['context']))
+        if not missing:
+            continue
+        statement = (source['text'] if missing == source['assignment']['value'].split() else
+                     transform('', {'type': 'make_packages', 'packages': missing}))
+        prefix = ''.join(raw.rstrip('\r\n') + '\n' for guard in source['guards']
+                         for _, raw in guard['branches'])
+        suffix = ''.join(guard['close'] + '\n' for guard in reversed(source['guards']))
+        block = prefix + statement.rstrip('\r\n') + '\n' + suffix
+        block = block.replace('\r\n', '\n').replace('\n', _newline(current)).rstrip('\r\n')
+        # Validate the complete wrapper before including it in a plan.
+        list(_make_statements(block))
+        _presence(report, 'Conditional package(s) absent from the whole current file: ' + ', '.join(missing) +
+                  '. Copying their reference condition(s) and PRODUCT_PACKAGES statement:\n' + block)
+        current = _append(current, [block])
+    return current
 
 
 def _reference_lines(text, action):
@@ -104,8 +167,8 @@ def augment_actions_from_reference(reference, actions):
         action = copy.deepcopy(original)
         kind = action.get("type")
         if kind == "make_packages":
-            action["packages"] = _reference_packages(reference, action)
-            if not action["packages"]:
+            action["packages"], action["conditional_packages"] = _reference_packages(reference, action)
+            if not action["packages"] and not action["conditional_packages"]:
                 continue
         elif kind == "ensure_lines":
             action["lines"] = _reference_lines(reference, action)
@@ -125,6 +188,9 @@ def augment_actions_from_reference(reference, actions):
 
 
 def apply_reference_action(current, action, *, report=None):
+    if action["type"] == "make_packages":
+        current = transform(current, action, report=report)
+        return _apply_conditional_packages(current, action.get('conditional_packages', []), report=report)
     if action["type"] == "reference_assignments":
         forward = (lambda message: report({"message": message, "review": False})) if report else None
         return copy_make_settings(current, action["reference"], action["keys"], [], report=forward)

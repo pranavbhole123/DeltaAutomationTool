@@ -4,11 +4,83 @@ import unittest
 
 from bt_delta.demo import fixture
 from bt_delta.planner import Planner
-from bt_delta.reference import copy_make_settings
+from bt_delta.blank import BlankPlanner
+from bt_delta.reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
 from bt_delta.transforms import TransformError
 
 
 class ReferenceTests(unittest.TestCase):
+    conditional_block = ('# SS_A2DP_FEATURE\n'
+                         'ifeq ($(shell secspfbool SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_AUDIO_HAL), y)\n'
+                         'PRODUCT_PACKAGES += \\\n    libsehbluetooth_audio_session\n'
+                         'endif\n')
+
+    def package_copy(self, current, reference, report=None):
+        actions = augment_actions_from_reference(reference, [{'type': 'make_packages',
+                    'reference_package_patterns': [r'(?i)bluetooth']}])
+        for action in actions:
+            current = apply_reference_action(current, action, report=report)
+        return current
+
+    def test_conditional_package_copies_its_complete_reference_guard(self):
+        reference = 'PRODUCT_PACKAGES += BluetoothAgent\n' + self.conditional_block
+        current = '# current section\nPRODUCT_PACKAGES += BluetoothAgent\n'
+        notices = []
+        result = self.package_copy(current, reference, notices.append)
+        self.assertEqual(result, current + self.conditional_block)
+        self.assertEqual(self.package_copy(result, reference), result)
+        self.assertEqual(result.count('BluetoothAgent'), 1)
+        self.assertIn('Copying their reference condition(s)', notices[-1]['message'])
+
+    def test_conditional_packages_preserve_nested_else_and_exclude_unrelated_packages(self):
+        reference = ('ifdef OUTER\nifeq ($(MODE),first)\n'
+                     'PRODUCT_PACKAGES += OtherPackage\nelse\n'
+                     'PRODUCT_PACKAGES += OtherService libbluetooth_feature\nendif\nendif\n')
+        expected = ('ifdef OUTER\nifeq ($(MODE),first)\nelse\n'
+                    'PRODUCT_PACKAGES += libbluetooth_feature\nendif\nendif\n')
+        self.assertEqual(self.package_copy('', reference), expected)
+        self.assertEqual(self.package_copy(expected, reference), expected)
+
+    def test_existing_conditional_package_elsewhere_is_not_duplicated(self):
+        current = '# other section\n' + self.conditional_block + '# tail\n'
+        self.assertEqual(self.package_copy(current, self.conditional_block), current)
+        for current in ('PRODUCT_PACKAGES += libsehbluetooth_audio_session\n',
+                        'ifdef OTHER\nPRODUCT_PACKAGES += libsehbluetooth_audio_session\nendif\n'):
+            notices = []
+            self.assertEqual(self.package_copy(current, self.conditional_block, notices.append), current)
+            self.assertTrue(notices[-1]['review'])
+            self.assertIn('conditions differ', notices[-1]['message'])
+
+    def test_same_package_in_reference_both_branches_preserves_both(self):
+        source = ('ifdef FIRST\nPRODUCT_PACKAGES += libbluetooth_feature\nelse\n'
+                  'PRODUCT_PACKAGES += libbluetooth_feature\nendif\n')
+        result = self.package_copy('', source)
+        self.assertEqual(result.count('PRODUCT_PACKAGES += libbluetooth_feature'), 2)
+        self.assertIn('else\nPRODUCT_PACKAGES += libbluetooth_feature\nendif', result)
+        self.assertEqual(self.package_copy(result, source), result)
+
+    def test_conditional_copy_uses_current_line_endings_and_rejects_malformed_source(self):
+        current = '# current\r\n'
+        result = self.package_copy(current, self.conditional_block)
+        self.assertEqual(result, current + self.conditional_block.replace('\n', '\r\n'))
+        with self.assertRaises(TransformError):
+            self.package_copy(current, self.conditional_block.removesuffix('endif\n'))
+
+    def test_both_plans_include_conditional_reference_package(self):
+        with tempfile.TemporaryDirectory() as root:
+            p4, config = fixture(root)
+            source = next(path for path in p4.data if 'PROD_BENI' in path and
+                          'm36x_sssi' in path and path.endswith('/device_common.mk'))
+            rev, data, kind = p4.data[source]
+            p4.data[source] = (rev, data + self.conditional_block.encode(), kind)
+            for builder in (Planner, BlankPlanner):
+                plan = builder(p4, config).build()
+                self.assertFalse([c for c in plan['checks'] if c['rule'] == 'system.packages' and c['status'] == 'blocked'])
+                preview = next(p for p in plan['previews'] if p['rule'] == 'system.packages')
+                self.assertIn(self.conditional_block, preview['content'])
+                change = next(c for c in plan['changes'] if 'system.packages' in c['rules'])
+                self.assertIn(self.conditional_block.encode(), base64.b64decode(change['after']))
+
     def test_copies_values_operators_comments_and_changed_include_path(self):
         source = 'BT ?= false # reference choice\ninclude vendor/new/BluetoothBoardConfigCommon.mk\n'
         current = 'KEEP := yes\r\nBT := true\r\ninclude vendor/old/BluetoothBoardConfigCommon.mk\r\n'
