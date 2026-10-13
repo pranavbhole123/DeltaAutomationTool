@@ -347,7 +347,7 @@
     },
     {
       "id": "vendor.firmware",
-      "title": "Verify firmware and approved release",
+      "title": "Verify mapped firmware path exists",
       "source": "SLSI!B34:C34",
       "scope": "vendor",
       "target": "firmware",

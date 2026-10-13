@@ -85,13 +85,13 @@ class ReferenceGuidedTests(unittest.TestCase):
 
     def test_absent_reference_verification_files_report_exact_paths(self):
         removed = []
-        for suffix in ('/manifest.xml', '/bluetooth.mk', '/mx140.bin'):
+        for suffix in ('/manifest.xml', '/bluetooth.mk'):
             path = self.path('reference', suffix)
             removed.append(path)
             del self.p4.data[path]
         for builder in (Planner, BlankPlanner):
             plan = builder(self.p4, self.config).build()
-            for rule, path in zip(('vendor.hals', 'vendor.hcf', 'vendor.firmware'), removed):
+            for rule, path in zip(('vendor.hals', 'vendor.hcf'), removed):
                 check = self.checks(plan, rule)[0]
                 self.assertEqual(check['status'], 'skipped')
                 self.assertIn(path, check['message'])

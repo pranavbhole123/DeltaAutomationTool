@@ -280,7 +280,10 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
     if preview_plan is not None:
         supplied = validate(config)
         for key, value in supplied.items():
-            if value not in (None, "", []) and value != preview_plan["config"].get(key):
+            expected = preview_plan["config"].get(key)
+            if key == "current" and isinstance(expected, dict):
+                expected = {k: v for k, v in expected.items() if k != "build_log_inputs"}
+            if value not in (None, "", []) and value != expected:
                 raise ValueError("Tab 4 preview inputs differ from current inputs; regenerate the preview before comparing.")
         source_plan = preview_plan
         log(f"Using supplied tab 4 previews: {len(source_plan['previews'])} entries; plan digest={source_plan['digest']}.")

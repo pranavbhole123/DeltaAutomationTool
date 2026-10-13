@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from .perforce import PerforceTimeout
+from .config import role_settings
 from .resolver import DiscoveryMiss
 from .csc import carrier_files, carrier_json, model_root
 from .planner import (Planner, canonical, decode, digest, make_values, name_selector,
@@ -121,7 +122,9 @@ class BlankPlanner(Planner):
 
     def blank_rule(self, rule):
         kind, scope, target = rule["kind"], rule["scope"], rule["target"]
-        if kind in ("manual", "verify_hals", "verify_firmware"):
+        if kind == "verify_firmware":
+            return self.verify_firmware(rule)
+        if kind in ("manual", "verify_hals"):
             paths = []
             if kind != "manual":
                 src = self.resolver.discover("reference", scope, target)
@@ -164,7 +167,7 @@ class BlankPlanner(Planner):
         current_blank = self.blank_content(path)
         if kind == "reference_make_settings":
             reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
-            if "WLAN_CHIP" in rule["keys"] and reference_chip and reference_chip != self.config["chipset"]:
+            if "WLAN_CHIP" in rule["keys"] and reference_chip and reference_chip != role_settings(self.config, "current")["chipset"]:
                 raise ValueError("Selected chipset differs from reference WLAN_CHIP")
             after = copy_make_settings(current_blank, reference, rule["keys"], rule.get("include_basenames", []),
                                        rule.get("key_patterns", []), report=self.log)
@@ -203,7 +206,7 @@ class BlankPlanner(Planner):
 
     def blank_carrier(self, rule):
         root = model_root(self.config["reference"]["csc_path"], self.config["model"])
-        current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
+        current_root = model_root(self.config["current"]["csc_path"], role_settings(self.config, "current")["model"])
         discovery = {}
         reference = carrier_files(self.p4, root, details=discovery)
         self.report_carrier_discovery(rule, discovery)

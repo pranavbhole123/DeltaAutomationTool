@@ -13,7 +13,8 @@ from pathlib import Path
 
 from .catalog import default_catalog
 from .csc import CARRIER_FILENAME, add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
-from .config import validate
+from .config import role_settings, validate
+from .build_log import read_build_log
 from .resolver import DiscoveryMiss, Resolver, relative_for
 from .diagnostics import emit
 from .transforms import TransformError, transform
@@ -168,6 +169,9 @@ class Planner:
     def start_log(self, mode):
         self.log(f"START {mode}: model={self.config['model']}; workspace={self.config['perforce']['client']}; "
                  f"CSC features={self.config['check_csc_features']}")
+        if self.config.get("current_log_path"):
+            self.log(f"Reading optional current build log: {self.config['current_log_path']}")
+            self.config["current"]["build_log_inputs"] = read_build_log(self.config["current_log_path"], self.log)
         for role in ("current", "reference"):
             for scope in ("system", "vendor"):
                 self.log(f"Inputs: {role}.{scope} template={self.config[role][scope + '_template']}")
@@ -299,7 +303,7 @@ class Planner:
             vendor = values.get("WLAN_VENDOR", "").strip('"')
             if vendor and vendor != "8":
                 raise ValueError("Reference WLAN_VENDOR is not SLSI (8)")
-            chip = values.get("WLAN_CHIP", "").strip('"').lower()
+            chip = values.get("WLAN_CHIP", "").strip('"').lower() or role_settings(self.config, "current").get("chipset", "")
             if not re.fullmatch(r"[a-z0-9_]+", chip):
                 raise ValueError("No usable reference WLAN_CHIP was found; enter chipset explicitly to resolve chipset-specific files. No default chipset is imposed.")
             self.config["chipset"] = chip
@@ -325,13 +329,21 @@ class Planner:
                     if len(aps) == 1:
                         self.config["ap"] = aps.pop()
                         break
-        self.variables = {"chipset": chip, "firmware": family,
+        current = role_settings(self.config, "current")
+        current_chip = current["chipset"].lower()
+        current_family = self.catalog["chipsets"].get(current_chip)
+        if not current_family:
+            raise ValueError(f"Current chipset {current_chip} is not in SLSI!C34. Add a verified chipset mapping to the catalog.")
+        if self.config["current"].get("build_log_inputs"):
+            self.config["current"]["build_log_inputs"]["firmware"] = current_family
+            self.log(f"Current inputs after build log: model={current['model']}; chipset={current_chip}; AP={current.get('ap') or 'unresolved'}; firmware family={current_family}.")
+        self.variables = {"chipset": current_chip, "firmware": current_family,
                           "efs": "/efs" if self.config["jdm"] else "/mnt/vendor/efs"}
         ref_chip = reference_values.get("WLAN_CHIP", "").strip('"').lower()
         self.log(f"Resolved model inputs: chipset={chip}; AP={self.config.get('ap') or 'unresolved'}; firmware family={family}; HCF variant={self.config.get('hcf_variant') or 'infer from reference'}")
-        if ref_chip and ref_chip != chip:
+        if ref_chip and ref_chip != current_chip:
             self.result({"id": "chip.review", "title": "Chipset differs from reference", "source": "SLSI!C6"},
-                        "review", f"Input chipset {chip}; reference chipset {ref_chip}. Confirm this hardware change.")
+                        "review", f"Current chipset {current_chip}; reference chipset {ref_chip}. Confirm this hardware change.")
 
     def build(self):
         self.start_log("normal plan")
@@ -416,7 +428,7 @@ class Planner:
         if kind == "verify_hals":
             return self.verify_reference_hals(rule)
         if kind == "verify_firmware":
-            return self.verify_reference_firmware(rule)
+            return self.verify_firmware(rule)
         src = self.resolver.discover("reference", scope, target)
         self.rule_paths = [src]
         source_snapshot = self.snapshot(src)
@@ -430,7 +442,7 @@ class Planner:
             snapshot = source_snapshot
             if "WLAN_CHIP" in rule["keys"]:
                 reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
-                if reference_chip and reference_chip != self.config["chipset"]:
+                if reference_chip and reference_chip != role_settings(self.config, "current")["chipset"]:
                     raise ValueError("Selected chipset differs from reference WLAN_CHIP; align the input before copying reference board settings")
             selection_notes = []
             def selection_report(message):
@@ -551,21 +563,16 @@ class Planner:
                         f"Reference {reference_hal.get('format', 'unspecified')} HAL {name}: " +
                         ("; ".join(differences) if differences else "format, transport, interfaces, fqnames and reference minimum versions match."), [reference_path, path])
 
-    def verify_reference_firmware(self, rule):
-        reference = self.resolver.discover("reference", "vendor", "firmware")
-        self.rule_paths = [reference]
-        source = self.snapshot(reference)
+    def verify_firmware(self, rule):
+        current = role_settings(self.config, "current")
+        family = current["firmware"]
         path = self.resolver.discover("current", "vendor", "firmware")
-        self.rule_paths.append(path)
-        current = self.snapshot(path)
-        expected = self.config.get("firmware_sha256", "").lower()
-        if expected and expected != current["sha256"]:
-            raise ValueError(f"Firmware {path}#{current['revision']} does not match explicitly supplied approved SHA-256 {expected}; actual={current['sha256']}")
-        self.result(rule, "pass" if expected else "review",
-                    f"Current firmware {path}#{current['revision']}, SHA-256 {current['sha256']}; "
-                    f"reference {reference}#{source['revision']}, SHA-256 {source['sha256']}. " +
-                    ("Bytes match reference. " if current['sha256'] == source['sha256'] else "Bytes differ from reference. ") +
-                    ("Matches supplied approved hash." if expected else "Verification only; confirm release suitability before replacing firmware."), [reference, path])
+        self.rule_paths = [path]
+        matches = f"/firmware/{family}/" in path
+        self.result(rule, "pass" if matches else "review",
+                    (f"Mapped current firmware path exists for {current['chipset']} → {family}."
+                     if matches else f"Current firmware path does not contain the mapped family /firmware/{family}/."),
+                    [path])
 
     def reference_hcf(self, rule):
         reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
@@ -644,7 +651,7 @@ class Planner:
                         [region["path"], *[file["path"] for file in files]])
 
     def carrier_features(self, rule):
-        current_root = model_root(self.config["current"]["csc_path"], self.config["model"])
+        current_root = model_root(self.config["current"]["csc_path"], role_settings(self.config, "current")["model"])
         reference_root = model_root(self.config["reference"]["csc_path"], self.config["model"])
         current = carrier_files(self.p4, current_root)
         discovery = {}
@@ -698,7 +705,8 @@ def summary(plan):
               "Approval applies only to these exact changes. BLOCKED checks stay untouched and are reported after apply. Creates a pending changelist; never shelves or submits."), ""]
     for key in ("current", "reference"):
         lines.append(f"{key}: {json.dumps(plan['config'][key])}")
-    lines.append("Resolved model settings: " + json.dumps({k: plan["config"].get(k) for k in ("model", "chipset", "firmware", "ap", "jdm", "hcf_variant", "products")}))
+    current = role_settings(plan["config"], "current")
+    lines.append("Resolved model settings: " + json.dumps({k: current.get(k) for k in ("model", "chipset", "firmware", "ap", "jdm", "hcf_variant", "products")}))
     for check in plan["checks"]:
         lines.extend(["", f"[{check['status'].upper()}] {check['title']} ({check['source']})", check["message"], *check["paths"]])
     for change in plan["changes"]:

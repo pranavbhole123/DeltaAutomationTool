@@ -10,6 +10,16 @@ class ConfigError(ValueError):
     pass
 
 
+def role_settings(config, role):
+    """Log identifiers supplement current settings only; reference stays independent."""
+    values = dict(config)
+    if role == "current":
+        values.update(config["current"].get("build_log_inputs", {}))
+        if values["model"] != config["model"]:
+            values["common_device"] = values["model"] + "_common"
+    return values
+
+
 def parse_details(text: str) -> dict:
     """Accept current/reference details; ignore legacy CP lines."""
     result = {"current": {}, "reference": {}}
@@ -44,6 +54,12 @@ def parse_details(text: str) -> dict:
 def validate(config: dict) -> dict:
     config = json.loads(json.dumps(config))
     config.pop("cp_template", None)
+    config.pop("firmware_sha256", None)
+    if isinstance(config.get("current"), dict):
+        config["current"].pop("build_log_inputs", None)
+    config.setdefault("current_log_path", "")
+    if not isinstance(config["current_log_path"], str):
+        raise ConfigError("current_log_path must be a file path or blank")
     config.setdefault("check_csc_features", False)
     if not isinstance(config["check_csc_features"], bool):
         raise ConfigError("check_csc_features must be true or false")
@@ -74,8 +90,6 @@ def validate(config: dict) -> dict:
     config.setdefault("products", [])
     if not isinstance(config["products"], list) or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", p) for p in config["products"]):
         raise ConfigError("products must be a list of TARGET_PRODUCT names")
-    if config.get("firmware_sha256") and not re.fullmatch(r"[0-9a-fA-F]{64}", config["firmware_sha256"]):
-        raise ConfigError("firmware_sha256 must be a 64-digit SHA-256")
     config.setdefault("paths", {})
     return config
 

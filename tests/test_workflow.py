@@ -115,7 +115,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("cp_template", plan["config"])
         self.assertNotIn("cp", plan["templates"])
         self.assertFalse(any(c["rule"] == "cp.context" for c in plan["checks"]))
-        self.assertTrue(any(c["rule"] == "vendor.firmware" and c["status"] == "review" for c in plan["checks"]))
+        self.assertTrue(any(c["rule"] == "vendor.firmware" and c["status"] == "pass" for c in plan["checks"]))
 
     def test_approval_and_review_required_before_any_mutation(self):
         plan = self.build()

@@ -110,7 +110,7 @@ def default_catalog():
              expected_hals=[{"name": "android.hardware.bluetooth", "version": "1.0", "interface": "IBluetoothHci"},
                             {"name": "vendor.samsung.hardware.bluetooth", "version": "2.0", "interface": "ISehBluetooth"}]),
         rule("vendor.hcf", "Verify HCF files and TARGET_PRODUCT copy filter", "B32", "vendor", "hcf", "verify_hcf"),
-        rule("vendor.firmware", "Verify firmware and approved release", "B34:C34", "vendor", "firmware", "verify_firmware"),
+        rule("vendor.firmware", "Verify mapped firmware path exists", "B34:C34", "vendor", "firmware", "verify_firmware"),
         rule("device.validation", "After build: verify phone Bluetooth address and firmware", "B36", "device", "phone", "manual",
              notes="Compare the phone BT address with {efs}/bluetooth/bt_addr. Check BT firmware with *#2663#. Requires a built device."),
     ]

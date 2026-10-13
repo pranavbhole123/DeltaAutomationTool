@@ -97,9 +97,10 @@ class App(ttk.Frame):
                   ("model", "Model"), ("chipset", "Chipset (blank: infer reference)"), ("ap", "AP directory (blank: infer reference)"),
                   ("hcf_variant", "HCF model folder (blank: infer bluetooth.mk)"),
                   ("products", "TARGET_PRODUCT names (blank: infer selected HCF block)"),
-                  ("firmware_sha256", "Approved firmware SHA-256 (optional)")]
+                  ("current_log_path", "Current build log (optional)")]
         for i, (key, label) in enumerate(labels):
             self.entry(self.settings, key, label, i)
+        ttk.Button(self.settings, text="Browse…", command=self.choose_current_log).grid(row=9, column=2, padx=(8, 0))
         ttk.Checkbutton(self.settings, text="JDM model: use /efs instead of /mnt/vendor/efs", variable=self.jdm, command=self.invalidate).grid(row=10, column=1, sticky="w", pady=5)
         ttk.Label(self.settings, text="Uses your existing p4 login ticket. Passwords are never requested or saved.").grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
         ttk.Label(self.settings, text='Optional exact depot overrides as JSON, e.g. {"current.system.board_config": "//depot/path/BoardConfigCommon.mk"}').grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 4))
@@ -212,6 +213,11 @@ class App(ttk.Frame):
                      "Comparing tab 4 Empty-file preview content with edits from the selected changelists.")
         except Exception as exc:
             messagebox.showerror("Changelist comparison", str(exc))
+
+    def choose_current_log(self):
+        path = filedialog.askopenfilename(title="Choose current build log", filetypes=[("Log files", "*.log *.txt"), ("All files", "*")])
+        if path:
+            self.values["current_log_path"].set(path)
 
     def set_config(self, config):
         self.extra_config = copy.deepcopy(config)

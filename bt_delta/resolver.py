@@ -5,6 +5,7 @@ import re
 from .perforce import MappingError, parse_view, translate_path, validate_depot_path
 from .catalog import PATH_RULES
 from .diagnostics import emit
+from .config import role_settings
 
 
 class DiscoveryMiss(MappingError):
@@ -55,8 +56,9 @@ class Resolver:
     def override(self, role, scope, target):
         return self.config["paths"].get(f"{role}.{scope}.{target}")
 
-    def _expand(self, value):
-        values = {k: str(self.config.get(k) or "") for k in
+    def _expand(self, value, role="reference"):
+        settings = role_settings(self.config, role)
+        values = {k: str(settings.get(k) or "") for k in
                   ("model", "common_device", "ap", "chipset", "firmware", "hcf_variant")}
         required = re.findall(r"{(\w+)}", value)
         missing = [name for name in required if not values.get(name)]
@@ -70,7 +72,8 @@ class Resolver:
             raise MappingError(f"Unresolved or empty path route: {value}")
         return result.strip("/")
 
-    def _route_candidates(self, scope, target, view, directory):
+    def _route_candidates(self, scope, target, view, directory, role="reference"):
+        settings = role_settings(self.config, role)
         routes = self.path_rules.get(scope, {}).get(target, [])
         if isinstance(routes, dict):
             routes = [routes]
@@ -79,7 +82,7 @@ class Resolver:
         candidates = set()
         for route in routes:
             anchor = route.get("anchor", "")
-            relative = self._expand(route.get("relative", ""))
+            relative = self._expand(route.get("relative", ""), role)
             emit(self.p4, f"Route {scope}.{target}: anchor={anchor}; relative={relative}")
             if not anchor.startswith("/") or not anchor.endswith("/") or "..." in anchor or "*" in anchor:
                 raise MappingError(f"Invalid stable anchor for {scope}.{target}: {anchor}")
@@ -96,10 +99,10 @@ class Resolver:
                         r"/EXYNOS[0-9]*/android/device/samsung/([^/]+)/$", static)
                     if manifest_root:
                         mapped_ap = manifest_root.group(1)
-                        number_parts = re.findall(r"\d+", self.config.get("chipset", ""))
+                        number_parts = re.findall(r"\d+", settings.get("chipset", ""))
                         digits = number_parts[-1] if number_parts else ""
-                        expected = {str(self.config.get("ap") or "").lower()}
-                        if digits:
+                        expected = {str(settings.get("ap") or "").lower()}
+                        if digits and not (role == "current" and self.config["current"].get("build_log_inputs", {}).get("ap")):
                             expected.update((f"erd{digits}", f"universal{digits}"))
                         if mapped_ap.lower() in expected:
                             candidate = static + "manifest.xml"
@@ -141,7 +144,7 @@ class Resolver:
         explicit = self.override(role, scope, target)
         try:
             candidates = ([validate_depot_path(explicit.rstrip("/"))] if explicit
-                          else self._route_candidates(scope, target, view, directory))
+                          else self._route_candidates(scope, target, view, directory, role))
         except MappingError as exc:
             if not str(exc).startswith("Set "):
                 raise
@@ -151,7 +154,7 @@ class Resolver:
         if not candidates:
             routes = self.path_rules.get(scope, {}).get(target, [])
             routes = [routes] if isinstance(routes, dict) else routes
-            requested = [route['anchor'] + self._expand(route['relative']) for route in routes]
+            requested = [route['anchor'] + self._expand(route['relative'], role) for route in routes]
             message = (f"{label}: couldn't find a mapped search path; no configured anchor route exists in this template View. "
                        "No p4 files query was made, so server-side absence is not established. "
                        "Attempted route(s), relative to a matching depot prefix: " + "; ".join(requested) +
@@ -178,9 +181,10 @@ class Resolver:
                     # folder names locally (e.g. m34x -> m34xnsxx).
                     suffix = path.removeprefix(candidate.rstrip("/") + "/")
                     folder, separator, _ = suffix.partition("/")
-                    model = re.escape(self.config["model"])
+                    model_name = role_settings(self.config, role)["model"]
+                    model = re.escape(model_name)
                     if not separator or not re.fullmatch(model + r"[a-zA-Z0-9_-]*", folder):
-                        emit(self.p4, f"HCF file ignored: {path}; folder does not match model {self.config['model']}.")
+                        emit(self.p4, f"HCF file ignored: {path}; folder does not match model {model_name}.")
                         continue
                 try:
                     relative_for(view, path)
@@ -208,6 +212,10 @@ class Resolver:
 
     def counterpart(self, source, scope):
         relative = relative_for(self.views[f"reference.{scope}"], source)
+        current = role_settings(self.config, "current")
+        if current["model"] != self.config["model"]:
+            names = {self.config["common_device"]: current["common_device"], self.config["model"]: current["model"]}
+            relative = "/".join(names.get(part, part) for part in relative.split("/"))
         return translate_path(self.views[f"current.{scope}"], relative)
 
     def blank_target(self, scope, target):
@@ -218,7 +226,7 @@ class Resolver:
         view = self.views[f"current.{scope}"]
         explicit = self.override("current", scope, target)
         candidates = ([validate_depot_path(explicit)] if explicit else
-                      self._route_candidates(scope, target, view, False))
+                      self._route_candidates(scope, target, view, False, "current"))
         mapped = []
         for path in candidates:
             try:

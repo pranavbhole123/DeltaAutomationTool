@@ -169,6 +169,16 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Tab 4 preview inputs differ'):
             compare_changelist(self.p4, other_config, '100', preview_plan=source_plan)
 
+    def test_tab4_preview_with_extracted_log_inputs_can_be_reused(self):
+        log = Path(self.temp.name) / 'current.log'
+        log.write_text('ro.product.board=s5e8835\nTARGET: m36x\nMODEL: erd8835\n')
+        self.config['current_log_path'] = str(log)
+        source_plan = Planner(self.p4, self.config).build()
+        self.assertIn('build_log_inputs', source_plan['config']['current'])
+        with patch('bt_delta.comparison.BlankPlanner', side_effect=AssertionError('Must reuse tab 4')):
+            report = compare_changelist(self.p4, self.config, '100', preview_plan=source_plan)
+        self.assertEqual(report['plan']['previews'], source_plan['previews'])
+
     def test_two_tab4_rules_for_same_file_preserve_both_rules_and_compare_once(self):
         source_plan = Planner(self.p4, self.config).build()
         previews = [item for item in source_plan['previews'] if item['rule'] in ('system.postfs', 'system.boot')]
