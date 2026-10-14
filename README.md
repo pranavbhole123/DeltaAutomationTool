@@ -10,8 +10,8 @@ A separate Python 3.10+ tool based on the supplied SLSI checklist. The old `src`
 
 Double-click `start.bat`, or run `python main.py` from this folder.
 
-1. Enter current and reference system/vendor template names. **Check CSC features** is unchecked by default; select it and supply both CSC depot paths to include carrier feature files. Your M36X example is prefilled. You can paste the original `C OS:` / `Reference ...` format.
-2. Enter Perforce server, user and workspace. Authenticate separately using your normal `p4 login`; the tool does not store passwords or log in automatically.
+1. Enter current and reference system/vendor template names. **Check CSC features** is unchecked by default; select it and supply both CSC depot paths to include carrier feature files. Your M36X example is prefilled. Tab 1 also contains model and technical inputs, the optional current build log, JDM selection and exact depot overrides.
+2. In **2. Perforce**, enter Perforce server, user and workspace. Authenticate separately using your normal `p4 login`; the tool does not store passwords or log in automatically.
 3. Enter the HCF folder and the intended `TARGET_PRODUCT` names. Chipset is read from the reference BoardConfig unless supplied. AP is read from its include, with the sheet's explicit s5e8835 → erd8835 mapping supported. Select JDM if applicable.
 4. Generate a plan. This uses only read operations on Perforce and writes the plan locally.
 5. Review the exact file diffs, reference revisions, source cells, REVIEW items, and BLOCKED items. Tick the review checkbox, then click **Apply reviewed changes to pending changelist**. Planned changes are applied; BLOCKED items are left untouched and shown again after execution for manual follow-up.
@@ -39,7 +39,7 @@ Rules use checklist hints plus editable selectors to identify Bluetooth content 
 
 ## Compare bring-up changelists with the blank plan
 
-Open **6. Changelist comparison**, enter one or more developer changelists separated by commas or spaces (for example `123456, 123457, 123458`), and set the current/reference system and vendor templates and CSC roots. Template fields are shared with tab 1; model, Perforce connection and exact path overrides use tab 2. Click **Compare with Empty-file preview**. The report opens automatically in **7. Comparison results**, a separate tab with a full-height report area and horizontal/vertical scrolling. Tab 6 retains the comparison inputs.
+Open **6. Changelist comparison**, enter one or more developer changelists separated by commas or spaces (for example `123456, 123457, 123458`), and set the current/reference system and vendor templates and CSC roots. Template fields are shared with tab 1; model and exact path overrides use tab 1; Perforce connection settings use tab 2. Click **Compare with Empty-file preview**. The report opens automatically in **7. Comparison results**, a separate tab with a full-height report area and horizontal/vertical scrolling. Tab 6 retains the comparison inputs.
 
 The comparison baseline is the file content shown in **4. Empty-file preview**, including previews for files that already match and need no proposed edits. When the displayed preview belongs to the same inputs, the comparison reuses those exact entries instead of generating a separate plan. Otherwise it generates reference/checklist previews and displays them in tab 4. Entries are grouped by their target paths, with every contributing rule ID preserved; repeated statements from multiple previews are compared once. Reference folder files (except `bdroid_buildcfg.h`), selected board statements, packages/includes, feature values, init commands, the reference HCF filter block and, when **Check CSC features** is selected, carrier JSON keys from every reference region are included. HAL/device checks are listed as manual items; firmware checks verify the mapped current path exists. These checks contribute no blank write content.
 

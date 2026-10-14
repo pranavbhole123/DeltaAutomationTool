@@ -11,7 +11,7 @@ import logging
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from .config import parse_details, validate
+from .config import validate
 from .comparison import compare_changelist, comparison_summary, parse_changelists, save_comparison
 from .demo import demo_plan
 from .executor import execute
@@ -58,8 +58,8 @@ class App(ttk.Frame):
         self.settings = ttk.Frame(self.tabs, padding=14)
         self.review = ttk.Frame(self.tabs, padding=10)
         self.preview = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.templates, text="1. Templates")
-        self.tabs.add(self.settings, text="2. Model & connection")
+        self.tabs.add(self.templates, text="1. Project inputs")
+        self.tabs.add(self.settings, text="2. Perforce")
         self.tabs.add(self.review, text="3. Review & approve")
         self.tabs.add(self.preview, text="4. Empty-file preview")
         self.log_tab = ttk.Frame(self.tabs, padding=10)
@@ -75,41 +75,45 @@ class App(ttk.Frame):
         self.comparison_source.trace_add("write", lambda *_: self.invalidate_comparison())
         self.log_box = scrolledtext.ScrolledText(self.log_tab, wrap="word", font=("Consolas", 10), state="disabled")
         self.log_box.pack(fill="both", expand=True)
+        self.templates.columnconfigure(0, weight=1)
         self.templates.columnconfigure(1, weight=1)
+        template_fields = ttk.Frame(self.templates)
+        template_fields.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        template_fields.columnconfigure(1, weight=1)
+        technical_fields = ttk.LabelFrame(self.templates, text="Model and technical inputs", padding=10)
+        technical_fields.grid(row=0, column=1, sticky="nsew")
+        technical_fields.columnconfigure(1, weight=1)
         row = 0
         for role, title in (("current", "Current OS"), ("reference", "Reference OS")):
-            ttk.Label(self.templates, text=title, font=("Segoe UI", 11, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 8))
+            ttk.Label(template_fields, text=title, font=("Segoe UI", 11, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 8))
             row += 1
             for field, label in (("system_template", "System template"), ("vendor_template", "Vendor template"), ("csc_path", "CSC model path")):
-                self.entry(self.templates, role + "." + field, label, row)
+                self.entry(template_fields, role + "." + field, label, row, width=32)
                 row += 1
-        ttk.Checkbutton(self.templates, text="Check CSC features", variable=self.check_csc_features,
+        ttk.Checkbutton(template_fields, text="Check CSC features", variable=self.check_csc_features,
                         command=self.invalidate).grid(row=row, column=1, sticky="w", pady=5)
-        row += 1
-        ttk.Label(self.templates, text="Or paste C OS / Reference details in your original format:").grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 5))
-        row += 1
-        self.paste = scrolledtext.ScrolledText(self.templates, height=7, wrap="word", font=("Consolas", 10))
-        self.paste.grid(row=row, column=0, columnspan=2, sticky="nsew")
-        self.templates.rowconfigure(row, weight=1)
-        row += 1
-        ttk.Button(self.templates, text="Use pasted details", command=self.parse_paste).grid(row=row, column=1, sticky="e", pady=8)
+        labels = [("model", "Model"), ("chipset", "Chipset (optional)"),
+                  ("ap", "AP directory (optional)"), ("hcf_variant", "HCF folder (optional)"),
+                  ("products", "TARGET_PRODUCT names"), ("current_log_path", "Current build log")]
+        for i, (key, label) in enumerate(labels):
+            self.entry(technical_fields, key, label, i, width=28)
+        ttk.Button(technical_fields, text="Browse…", command=self.choose_current_log).grid(row=6, column=1, sticky="e", pady=4)
+        ttk.Checkbutton(technical_fields, text="JDM: use /efs instead of /mnt/vendor/efs", variable=self.jdm,
+                        command=self.invalidate).grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
+        ttk.Label(technical_fields, text="Blank chipset/AP: infer reference. Blank HCF/products: infer bluetooth.mk.\nBuild log is optional and supplies current-template details.",
+                  wraplength=400).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+        ttk.Label(self.templates, text='Optional exact depot overrides as JSON, e.g. {"current.system.board_config": "//depot/path/BoardConfigCommon.mk"}',
+                  wraplength=850).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        self.overrides = scrolledtext.ScrolledText(self.templates, height=4, font=("Consolas", 10))
+        self.overrides.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        self.templates.rowconfigure(2, weight=1)
+        self.overrides.bind("<<Modified>>", self.modified)
         self.settings.columnconfigure(1, weight=1)
         labels = [("perforce.port", "Perforce server (P4PORT)"), ("perforce.user", "Perforce user"),
-                  ("perforce.client", "Existing writable workspace"), ("perforce.executable", "p4 executable"),
-                  ("model", "Model"), ("chipset", "Chipset (blank: infer reference)"), ("ap", "AP directory (blank: infer reference)"),
-                  ("hcf_variant", "HCF model folder (blank: infer bluetooth.mk)"),
-                  ("products", "TARGET_PRODUCT names (blank: infer selected HCF block)"),
-                  ("current_log_path", "Current build log (optional)")]
+                  ("perforce.client", "Existing writable workspace"), ("perforce.executable", "p4 executable")]
         for i, (key, label) in enumerate(labels):
             self.entry(self.settings, key, label, i)
-        ttk.Button(self.settings, text="Browse…", command=self.choose_current_log).grid(row=9, column=2, padx=(8, 0))
-        ttk.Checkbutton(self.settings, text="JDM model: use /efs instead of /mnt/vendor/efs", variable=self.jdm, command=self.invalidate).grid(row=10, column=1, sticky="w", pady=5)
-        ttk.Label(self.settings, text="Uses your existing p4 login ticket. Passwords are never requested or saved.").grid(row=11, column=0, columnspan=2, sticky="w", pady=5)
-        ttk.Label(self.settings, text='Optional exact depot overrides as JSON, e.g. {"current.system.board_config": "//depot/path/BoardConfigCommon.mk"}').grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 4))
-        self.overrides = scrolledtext.ScrolledText(self.settings, height=5, font=("Consolas", 10))
-        self.overrides.grid(row=13, column=0, columnspan=2, sticky="nsew")
-        self.settings.rowconfigure(13, weight=1)
-        self.overrides.bind("<<Modified>>", self.modified)
+        ttk.Label(self.settings, text="Uses your existing p4 login ticket. Passwords are never requested or saved.").grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
         self.summary_box = scrolledtext.ScrolledText(self.review, wrap="none", font=("Consolas", 10), state="disabled")
         self.summary_box.pack(fill="both", expand=True)
         self.summary_box.tag_configure("diff_add", foreground="#146c2e", background="#e6f4ea")
@@ -125,12 +129,12 @@ class App(ttk.Frame):
         self.set_config(json.loads((BASE / "examples" / "m36x.json").read_text(encoding="utf-8")))
         self.root.after(100, self.poll)
 
-    def entry(self, parent, key, label, row):
+    def entry(self, parent, key, label, row, *, width=76):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 14), pady=4)
         variable = tk.StringVar()
         self.values[key] = variable
         variable.trace_add("write", lambda *_: self.invalidate())
-        ttk.Entry(parent, textvariable=variable, width=76).grid(row=row, column=1, sticky="ew", pady=4)
+        ttk.Entry(parent, textvariable=variable, width=width).grid(row=row, column=1, sticky="ew", pady=4)
 
     def modified(self, _event):
         if self.overrides.edit_modified():
@@ -258,18 +262,6 @@ class App(ttk.Frame):
         result["products"] = [x.strip() for x in result["products"].split(",") if x.strip()]
         result["paths"] = json.loads(self.overrides.get("1.0", "end").strip() or "{}")
         return validate(result) if checked else result
-
-    def parse_paste(self):
-        try:
-            for key, value in parse_details(self.paste.get("1.0", "end")).items():
-                if isinstance(value, dict):
-                    for field, content in value.items():
-                        self.values[key + "." + field].set(content)
-                else:
-                    self.values[key].set(value)
-            self.status.set("Template details loaded. Check model and connection settings.")
-        except Exception as exc:
-            messagebox.showerror("Input", str(exc))
 
     def load_config(self):
         if self.busy:
