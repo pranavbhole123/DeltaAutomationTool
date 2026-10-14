@@ -19,7 +19,7 @@ from .resolver import DiscoveryMiss, Resolver, relative_for
 from .diagnostics import emit
 from .transforms import TransformError, transform
 from .reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
-from .perforce import PerforceTimeout
+from .perforce import MappingError, PerforceTimeout, parse_view
 
 
 def digest(value):
@@ -723,6 +723,52 @@ def summary(plan):
         lines.extend(["", "=" * 72, f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}",
                       f"Workspace file: {change['local_path']}" if change['local_path'] else "Comparison only; no local workspace target required.",
                       "Checklist: " + ", ".join(change["sources"]), change["diff"]])
+    return "\n".join(lines) + "\n"
+
+
+def compact_summary(plan):
+    """Approval view: statuses and filenames, followed by exact proposed diffs."""
+    views = [(key.split(".")[0], parse_view(spec))
+             for key, spec in plan.get("templates", {}).items()]
+    known_roles = {}
+    for preview in plan.get("previews", []):
+        for key, role in (("reference_path", "reference"), ("target_path", "current")):
+            if preview.get(key):
+                known_roles.setdefault(preview[key], set()).add(role)
+    for change in plan["changes"]:
+        known_roles.setdefault(change["path"], set()).add("current")
+
+    def roles_for(path):
+        roles = set(known_roles.get(path, ()))
+        for role, view in views:
+            try:
+                relative_for(view, path)
+            except MappingError:
+                continue
+            roles.add(role)
+        for role in ("reference", "current"):
+            csc = plan.get("config", {}).get(role, {}).get("csc_path", "").rstrip("/")
+            if csc and path.startswith(csc + "/"):
+                roles.add(role)
+        return roles
+
+    lines = []
+    for check in plan["checks"]:
+        lines.append(f"[{check['status'].upper()}] {check['title']} ({check['source']})")
+        files = {"reference": [], "current": [], "unknown": []}
+        for path in dict.fromkeys(check.get("paths", [])):
+            for role in roles_for(path) or {"unknown"}:
+                files[role].append(path.rsplit("/", 1)[-1])
+        for role, label in (("reference", "Reference"), ("current", "Current")):
+            lines.append(f"  {label}: " + (", ".join(files[role]) or "—"))
+        if files["unknown"]:
+            lines.append("  Unresolved role: " + ", ".join(files["unknown"]))
+        lines.append("")
+    lines.append("PROPOSED EDITS")
+    if not plan["changes"]:
+        lines.append("None.")
+    for change in plan["changes"]:
+        lines.extend(["", f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}", change["diff"]])
     return "\n".join(lines) + "\n"
 
 

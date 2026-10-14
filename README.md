@@ -10,11 +10,11 @@ A separate Python 3.10+ tool based on the supplied SLSI checklist. The old `src`
 
 Double-click `start.bat`, or run `python main.py` from this folder.
 
-1. Enter current and reference system/vendor template names. **Check CSC features** is unchecked by default; select it and supply both CSC depot paths to include carrier feature files. Your M36X example is prefilled. Tab 1 also contains model and technical inputs, the optional current build log, JDM selection and exact depot overrides.
+1. Enter current and reference system/vendor template names. **Check CSC features** is unchecked by default; select it and supply both CSC depot paths to include carrier feature files. Your M36X example is prefilled. Tab 1 also contains model, optional chipset and current build log inputs, JDM selection and exact depot overrides.
 2. In **2. Perforce**, enter Perforce server, user and workspace. Authenticate separately using your normal `p4 login`; the tool does not store passwords or log in automatically.
-3. Enter the HCF folder and the intended `TARGET_PRODUCT` names. Chipset is read from the reference BoardConfig unless supplied. AP is read from its include, with the sheet's explicit s5e8835 → erd8835 mapping supported. Select JDM if applicable.
+3. Enter the model and optionally the chipset/current build log in tab 1. Select JDM if applicable. AP, HCF folder and TARGET_PRODUCT values are inferred; existing values loaded from JSON inputs are preserved.
 4. Generate a plan. This uses only read operations on Perforce and writes the plan locally.
-5. Review the exact file diffs, reference revisions, source cells, REVIEW items, and BLOCKED items. Tick the review checkbox, then click **Apply reviewed changes to pending changelist**. Planned changes are applied; BLOCKED items are left untouched and shown again after execution for manual follow-up.
+5. **3. Review & approve** shows each check status and reference/current filenames, followed by the exact proposed edits. **8. Detailed report** contains full paths and all explanations, including REVIEW and BLOCKED reasons; it is also saved as `plan.txt` alongside `plan.json`. Review those reasons and the diffs, tick the review checkbox, then apply to a pending changelist. BLOCKED items remain untouched.
 
 The result is a dedicated **pending** changelist. Nothing is submitted automatically. Build and perform the phone checks listed in the plan afterwards.
 

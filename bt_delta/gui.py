@@ -16,7 +16,7 @@ from .comparison import compare_changelist, comparison_summary, parse_changelist
 from .demo import demo_plan
 from .executor import execute
 from .perforce import P4CLI
-from .planner import Planner, canonical, digest, preview_summary, save_plan, summary
+from .planner import Planner, canonical, compact_summary, digest, preview_summary, save_plan, summary
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -68,6 +68,10 @@ class App(ttk.Frame):
         self.tabs.add(self.comparison_tab, text="6. Changelist comparison")
         self.comparison_results_tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(self.comparison_results_tab, text="7. Comparison results")
+        self.detail_tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(self.detail_tab, text="8. Detailed report")
+        self.detail_box = scrolledtext.ScrolledText(self.detail_tab, wrap="none", font=("Consolas", 10), state="disabled")
+        self.detail_box.pack(fill="both", expand=True)
         self.changelist = tk.StringVar()
         self.comparison_source = tk.StringVar(value="auto")
         self.comparison_status = tk.StringVar(value="Enter developer changelists to compare with tab 4 Empty-file preview.")
@@ -93,15 +97,14 @@ class App(ttk.Frame):
         ttk.Checkbutton(template_fields, text="Check CSC features", variable=self.check_csc_features,
                         command=self.invalidate).grid(row=row, column=1, sticky="w", pady=5)
         labels = [("model", "Model"), ("chipset", "Chipset (optional)"),
-                  ("ap", "AP directory (optional)"), ("hcf_variant", "HCF folder (optional)"),
-                  ("products", "TARGET_PRODUCT names"), ("current_log_path", "Current build log")]
+                  ("current_log_path", "Current build log (optional)")]
         for i, (key, label) in enumerate(labels):
             self.entry(technical_fields, key, label, i, width=28)
-        ttk.Button(technical_fields, text="Browse…", command=self.choose_current_log).grid(row=6, column=1, sticky="e", pady=4)
+        ttk.Button(technical_fields, text="Browse…", command=self.choose_current_log).grid(row=3, column=1, sticky="e", pady=4)
         ttk.Checkbutton(technical_fields, text="JDM: use /efs instead of /mnt/vendor/efs", variable=self.jdm,
-                        command=self.invalidate).grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
-        ttk.Label(technical_fields, text="Blank chipset/AP: infer reference. Blank HCF/products: infer bluetooth.mk.\nBuild log is optional and supplies current-template details.",
-                  wraplength=400).grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+                        command=self.invalidate).grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
+        ttk.Label(technical_fields, text="Blank chipset: infer reference.\nBuild log supplies current-template details.",
+                  wraplength=400).grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
         ttk.Label(self.templates, text='Optional exact depot overrides as JSON, e.g. {"current.system.board_config": "//depot/path/BoardConfigCommon.mk"}',
                   wraplength=850).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 4))
         self.overrides = scrolledtext.ScrolledText(self.templates, height=4, font=("Consolas", 10))
@@ -119,7 +122,7 @@ class App(ttk.Frame):
         self.summary_box.tag_configure("diff_add", foreground="#146c2e", background="#e6f4ea")
         self.summary_box.tag_configure("diff_delete", foreground="#b3261e", background="#fce8e6")
         self.summary_box.tag_configure("diff_hunk", foreground="#075985", background="#e0f2fe")
-        ttk.Checkbutton(self.review, text="I reviewed the exact diffs and REVIEW items. I understand BLOCKED items will be left untouched.", variable=self.approved, command=self.update_apply).pack(anchor="w", pady=(10, 5))
+        ttk.Checkbutton(self.review, text="I reviewed the proposed edits and REVIEW/BLOCKED reasons in Detailed report. BLOCKED items stay untouched.", variable=self.approved, command=self.update_apply).pack(anchor="w", pady=(10, 5))
         self.apply_button = ttk.Button(self.review, text="Apply reviewed changes to pending changelist", command=self.apply, state="disabled")
         self.apply_button.pack(anchor="e")
         ttk.Label(self, textvariable=self.status, wraplength=1050).pack(anchor="w", pady=(10, 0))
@@ -259,7 +262,6 @@ class App(ttk.Frame):
                 result[section][field] = value
             else:
                 result[key] = value
-        result["products"] = [x.strip() for x in result["products"].split(",") if x.strip()]
         result["paths"] = json.loads(self.overrides.get("1.0", "end").strip() or "{}")
         return validate(result) if checked else result
 
@@ -340,15 +342,19 @@ class App(ttk.Frame):
         self.plan_path = save_plan(plan, folder)
         self.summary_box.configure(state="normal")
         self.summary_box.delete("1.0", "end")
-        for line in summary(plan).splitlines(keepends=True):
+        for line in compact_summary(plan).splitlines(keepends=True):
             tag = review_line_tag(line)
             self.summary_box.insert("end", line, tag if tag else ())
         self.summary_box.configure(state="disabled")
+        self.detail_box.configure(state="normal")
+        self.detail_box.delete("1.0", "end")
+        self.detail_box.insert("1.0", summary(plan))
+        self.detail_box.configure(state="disabled")
         self.show_previews(plan)
         self.preview_input_hash = self.input_hash
         self.approved.set(False)
         self.tabs.select(self.review)
-        self.status.set(f"Plan saved to {self.plan_path}. Review diffs; blocked items will remain manual work.")
+        self.status.set(f"Plan saved to {self.plan_path}. Full reasons: Detailed report tab and plan.txt.")
 
     def show_previews(self, plan):
         self.preview_plan = copy.deepcopy(plan)
