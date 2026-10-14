@@ -2,6 +2,10 @@
 
 A separate Python 3.10+ tool based on the supplied SLSI checklist. The old `src` and CSV rules are not imported. All new code is in this folder. No Python packages need installing; the desktop interface uses Tkinter. Live operation requires the Perforce command-line client and an existing logged-in, mapped workspace.
 
+## Architecture
+
+[View the architecture diagram](docs/architecture.md) ([SVG](docs/architecture.svg), [Mermaid source](docs/architecture.mmd)).
+
 ## Run
 
 Double-click `start.bat`, or run `python main.py` from this folder.

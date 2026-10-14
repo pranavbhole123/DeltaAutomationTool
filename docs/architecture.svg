@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1160" viewBox="0 0 1320 1160" role="img" aria-labelledby="title desc">
+<title id="title">SLSI Bluetooth Delta architecture</title><desc id="desc">Configuration and template discovery feed read-only planning. A reviewed plan can be applied to a pending changelist. Empty-file previews feed a separate read-only changelist comparison that checks latest content before reporting missing suggestions.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#64748b"/></marker></defs>
+<style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172033}.title{font-size:26px;font-weight:700}.heading{font-size:17px;font-weight:700}.body{font-size:14px}.small{font-size:13px;fill:#475569}.lane{font-size:16px;font-weight:700;letter-spacing:1px}.edge{fill:none;stroke:#64748b;stroke-width:2;marker-end:url(#arrow)}</style>
+<rect width="1320" height="1160" fill="#f8fafc"/>
+<text x="660" y="43" text-anchor="middle" class="title">SLSI Bluetooth Delta</text>
+<text x="660" y="68" text-anchor="middle" class="small">Current implementation · component and data flow</text>
+<rect x="40" y="95" width="380" height="112" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="230.0" y="122" text-anchor="middle" class="heading">Inputs · config.py</text>
+<text x="230.0" y="147" text-anchor="middle" class="body">Four template names + model + P4 workspace</text>
+<text x="230.0" y="168" text-anchor="middle" class="body">Optional exact paths and CSC checks</text>
+<text x="230.0" y="189" text-anchor="middle" class="body">Optional build log: current board / TARGET / MODEL</text>
+<rect x="470" y="95" width="380" height="112" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="660.0" y="122" text-anchor="middle" class="heading">Entry · main.py → cli.py</text>
+<text x="660.0" y="147" text-anchor="middle" class="body">Tkinter GUI or CLI commands</text>
+<text x="660.0" y="168" text-anchor="middle" class="body">GUI: worker thread → queue → UI updates</text>
+<text x="660.0" y="189" text-anchor="middle" class="body">plan · compare · apply · offline demo</text>
+<rect x="900" y="95" width="380" height="112" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1090.0" y="122" text-anchor="middle" class="heading">Rules · catalog.py</text>
+<text x="1090.0" y="147" text-anchor="middle" class="body">Default catalogue or supplied catalogue</text>
+<text x="1090.0" y="168" text-anchor="middle" class="body">Reference selectors guide desired content</text>
+<text x="1090.0" y="189" text-anchor="middle" class="body">Checklist cells retained as provenance</text>
+<path d="M420 151 H470" class="edge"/>
+<path d="M900 151 H850" class="edge"/>
+<rect x="260" y="240" width="800" height="112" rx="10" fill="#eef2ff" stroke="#cbd5e1"/>
+<text x="660.0" y="267" text-anchor="middle" class="heading">Shared discovery and selection</text>
+<text x="660.0" y="292" text-anchor="middle" class="body">resolver.py: template Views → exact mapped depot paths; overrides and exclusions</text>
+<text x="660.0" y="313" text-anchor="middle" class="body">reference.py + transforms.py: select content, preserve guards, avoid duplicate edits</text>
+<text x="660.0" y="334" text-anchor="middle" class="body">csc.py: optional carrier JSON handling</text>
+<path d="M660 207 V240" class="edge"/>
+<rect x="30" y="390" width="400" height="590" rx="14" fill="#eff6ff" stroke="#dbe2ea"/>
+<text x="230" y="420" text-anchor="middle" class="lane">PLAN · READ ONLY</text>
+<rect x="460" y="390" width="400" height="590" rx="14" fill="#fff7ed" stroke="#dbe2ea"/>
+<text x="660" y="420" text-anchor="middle" class="lane">APPLY · APPROVED WRITES</text>
+<rect x="890" y="390" width="400" height="590" rx="14" fill="#f0fdf4" stroke="#dbe2ea"/>
+<text x="1090" y="420" text-anchor="middle" class="lane">COMPARE · READ ONLY</text>
+<rect x="50" y="445" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="230.0" y="472" text-anchor="middle" class="heading">Planner · planner.py</text>
+<text x="230.0" y="497" text-anchor="middle" class="body">Read reference and current revisions</text>
+<text x="230.0" y="518" text-anchor="middle" class="body">Evaluate rules; compute in-memory edits</text>
+<text x="230.0" y="539" text-anchor="middle" class="body">Cache discovery and content</text>
+<rect x="50" y="585" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="230.0" y="612" text-anchor="middle" class="heading">Sealed normal plan</text>
+<text x="230.0" y="637" text-anchor="middle" class="body">Checks + exact before/after content + diffs</text>
+<text x="230.0" y="658" text-anchor="middle" class="body">Snapshots, revisions and approval digest</text>
+<text x="230.0" y="679" text-anchor="middle" class="body">plan.json + plan.txt</text>
+<rect x="50" y="735" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="230.0" y="762" text-anchor="middle" class="heading">Tab 4 · Empty-file preview</text>
+<text x="230.0" y="787" text-anchor="middle" class="body">Reference-selected content for blank targets</text>
+<text x="230.0" y="808" text-anchor="middle" class="body">Includes rules needing no regular edit</text>
+<text x="230.0" y="829" text-anchor="middle" class="body">Fallback generation: BlankPlanner · blank.py</text>
+<path d="M660 352 V372 H42 V432 H230 V445" class="edge"/>
+<path d="M230 549 V585" class="edge"/>
+<path d="M50 497 H42 V787 H50" class="edge"/>
+<rect x="480" y="445" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="660.0" y="472" text-anchor="middle" class="heading">Tab 3 · Review and approve</text>
+<text x="660.0" y="497" text-anchor="middle" class="body">Inspect normal plan and exact diffs</text>
+<text x="660.0" y="518" text-anchor="middle" class="body">Approve the full plan digest</text>
+<text x="660.0" y="539" text-anchor="middle" class="body">Acknowledge review / blocked checks</text>
+<rect x="480" y="585" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="660.0" y="612" text-anchor="middle" class="heading">Executor · executor.py</text>
+<text x="660.0" y="637" text-anchor="middle" class="body">Verify identity, Views and snapshots</text>
+<text x="660.0" y="658" text-anchor="middle" class="body">Check revisions, hashes and workspace state</text>
+<text x="660.0" y="679" text-anchor="middle" class="body">Reject stale or inspection-only plans</text>
+<rect x="480" y="735" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="660.0" y="762" text-anchor="middle" class="heading">Apply exact planned files</text>
+<text x="660.0" y="787" text-anchor="middle" class="body">Create dedicated pending changelist</text>
+<text x="660.0" y="808" text-anchor="middle" class="body">Sync / edit / add; write and verify content</text>
+<text x="660.0" y="829" text-anchor="middle" class="body">Save execution journal</text>
+<path d="M410 637 H445 V497 H480" class="edge"/>
+<path d="M660 549 V585" class="edge"/>
+<path d="M660 689 V735" class="edge"/>
+<rect x="910" y="445" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1090.0" y="472" text-anchor="middle" class="heading">Selected changelists</text>
+<text x="1090.0" y="497" text-anchor="middle" class="body">Submitted: before/after depot revisions</text>
+<text x="1090.0" y="518" text-anchor="middle" class="body">Pending: shelf or configured workspace</text>
+<text x="1090.0" y="539" text-anchor="middle" class="body">Combine selected edits in defined order</text>
+<rect x="910" y="585" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1090.0" y="612" text-anchor="middle" class="heading">comparison.py</text>
+<text x="1090.0" y="637" text-anchor="middle" class="body">Match preview against surviving additions</text>
+<text x="1090.0" y="658" text-anchor="middle" class="body">Unmatched: read latest exact target file</text>
+<text x="1090.0" y="679" text-anchor="middle" class="body">Present → Already present; absent → Missing</text>
+<rect x="910" y="735" width="360" height="104" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="1090.0" y="762" text-anchor="middle" class="heading">Tab 7 · Comparison results</text>
+<text x="1090.0" y="787" text-anchor="middle" class="body">Matched · Already present · Missing</text>
+<text x="1090.0" y="808" text-anchor="middle" class="body">Extra · Error; per-file evidence and diffs</text>
+<text x="1090.0" y="829" text-anchor="middle" class="body">comparison.json + comparison.txt</text>
+<path d="M1090 549 V585" class="edge"/>
+<path d="M1090 689 V735" class="edge"/>
+<path d="M410 787 H435 V709 H880 V637 H910" class="edge"/>
+<text x="230" y="883" text-anchor="middle" class="small">HIDL/AIDL: verify manifest entries</text><text x="230" y="906" text-anchor="middle" class="small">Firmware: mapped path presence</text><text x="230" y="929" text-anchor="middle" class="small">HCF: verify files + bluetooth.mk filter</text>
+<text x="660" y="883" text-anchor="middle" class="small">Result: local workspace edits in pending CL</text><text x="660" y="906" text-anchor="middle" class="small">No automatic shelf or submit</text><text x="660" y="929" text-anchor="middle" class="small">No edits → no changelist</text>
+<text x="1090" y="883" text-anchor="middle" class="small">Latest init presence: scan entire file</text><text x="1090" y="906" text-anchor="middle" class="small">bdroid_buildcfg.h excluded from comparison</text><text x="1090" y="929" text-anchor="middle" class="small">Read failures → Error, never Missing</text>
+<rect x="40" y="1010" width="800" height="105" rx="10" fill="#e2e8f0" stroke="#cbd5e1"/>
+<text x="440.0" y="1037" text-anchor="middle" class="heading">Shared Perforce adapter · perforce.py</text>
+<text x="440.0" y="1062" text-anchor="middle" class="body">P4CLI wraps p4 subprocesses using the existing login ticket</text>
+<text x="440.0" y="1083" text-anchor="middle" class="body">Reads: client Views, files, revisions, changelist metadata and shelves</text>
+<text x="440.0" y="1104" text-anchor="middle" class="body">Executor enables writes only after validation</text>
+<rect x="870" y="1010" width="410" height="105" rx="10" fill="#e2e8f0" stroke="#cbd5e1"/>
+<text x="1075.0" y="1037" text-anchor="middle" class="heading">Progress and diagnostics</text>
+<text x="1075.0" y="1062" text-anchor="middle" class="body">GUI Live log + runtime.log</text>
+<text x="1075.0" y="1083" text-anchor="middle" class="body">CLI console progress</text>
+<text x="1075.0" y="1104" text-anchor="middle" class="body">DemoP4 provides synthetic offline data</text>
+</svg>
