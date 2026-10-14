@@ -61,6 +61,27 @@ class ReferenceGuidedTests(unittest.TestCase):
         current = 'ifdef KEEP\nBT := true\nendif\ninclude old/BluetoothBoardConfigCommon.mk\n'
         self.assertEqual(copy_make_settings(current, '# no Bluetooth configuration\n', ['BT'], ['BluetoothBoardConfigCommon.mk']), current)
 
+    def test_board_review_result_excludes_empty_file_preview_diagnostics(self):
+        reference = self.path('reference', '/BoardConfigCommon.mk')
+        current = self.path('current', '/BoardConfigCommon.mk')
+        for matches in (False, True):
+            with self.subTest(matches=matches):
+                self.messages.clear()
+                self.put(current, self.p4.data[reference][1] if matches else '# empty board\n')
+                plan = Planner(self.p4, self.config).build()
+                check = self.checks(plan, 'system.board')[0]
+                self.assertEqual('pass' if matches else 'change', check['status'])
+                self.assertNotIn('absent after scanning', check['message'])
+                self.assertNotIn('adding the selected', check['message'])
+                self.assertNotIn('Selected reference setting:', check['message'])
+                preview = next(p for p in plan['previews'] if p['rule'] == 'system.board')
+                self.assertIn('BOARD_HAVE_BLUETOOTH', preview['content'])
+                preview_logs = [m for m in self.messages if 'system.board: empty-file preview:' in m]
+                self.assertTrue(any('empty preview; adding' in m for m in preview_logs))
+                self.assertFalse(any('current file' in m for m in preview_logs))
+                current_logs = [m for m in self.messages if 'system.board: current file:' in m]
+                self.assertTrue(any(('reuse this location' if matches else 'absent after scanning') in m for m in current_logs))
+
     def test_init_model_filename_is_found_for_current_and_reference(self):
         for role in ('current', 'reference'):
             old = self.path(role, '/init.m36x.rc', True)

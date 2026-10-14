@@ -444,24 +444,22 @@ class Planner:
                 reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
                 if reference_chip and reference_chip != role_settings(self.config, "current")["chipset"]:
                     raise ValueError("Selected chipset differs from reference WLAN_CHIP; align the input before copying reference board settings")
-            selection_notes = []
-            def selection_report(message):
-                self.log(message)
-                selection_notes.append(message)
             empty_preview = copy_make_settings("", reference, rule["keys"], rule.get("include_basenames", []),
-                                               rule.get("key_patterns", []), report=selection_report)
+                                               rule.get("key_patterns", []),
+                                               report=lambda message: self.log(f"{rule['id']}: empty-file preview: " + message.replace("current file", "empty preview")))
             if not empty_preview:
                 self.result(rule, "skipped", "Reference contains no selected board settings or includes; current content is preserved.", [src, path])
                 return
             self.preview(rule, path, empty_preview, reference_path=src,
                          note="Selected reference statements that would be placed into an empty target file.")
             after = copy_make_settings(text, reference, rule["keys"], rule.get("include_basenames", []),
-                                       rule.get("key_patterns", []), report=self.log)
+                                       rule.get("key_patterns", []),
+                                       report=lambda message: self.log(f"{rule['id']}: current file: {message}"))
             changed = self.propose(path, after.encode(encoding), rule)
             self.result(rule, "change" if changed else "pass",
                         (f"Selected statements differ; proposed values, operators and include path come from reference #{snapshot['revision']}."
                          if changed else
-                         f"Selected Bluetooth/WLAN statements and include already match reference #{snapshot['revision']}; no change planned. Other file content was not required to match.") + "\n" + "\n".join(selection_notes),
+                         f"Selected Bluetooth/WLAN statements and include already match reference #{snapshot['revision']}; no change planned. Other file content was not required to match."),
                         [src, path])
             return
         if kind == "reference_features":
