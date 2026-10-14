@@ -20,7 +20,7 @@ from .executor import supported_type, verify_workspace_path
 from .perforce import MappingError, PerforceError, PerforceTimeout, parse_view, _revision
 from .planner import decode, digest, save_plan
 from .resolver import relative_for
-from .transforms import _ASSIGNMENT, _comment, _make_statements
+from .transforms import _ASSIGNMENT, _comment, _make_statements, _tokens
 
 DELETES = {"delete", "move/delete"}
 ADDS = {"add", "branch", "move/add"}
@@ -153,6 +153,13 @@ def content_units(path, content, file_type="text"):
 
 def _signature(unit):
     return unit["identity"], unit["value"]
+
+
+def _init_command(unit):
+    """Active init commands can satisfy file-wide presence across event blocks."""
+    if unit["identity"].startswith("init:") and not unit["value"].startswith("#"):
+        return tuple(_tokens(unit["value"]))
+    return None
 
 
 def _difference(left, right):
@@ -319,7 +326,7 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
     if not plan["config"]["check_csc_features"]:
         warnings.append("CSC feature checks are disabled; " + CARRIER_FILENAME + " changelist entries are excluded.")
     if not plan["previews"]:
-        warnings.append("Tab 4 has no preview entries. The comparison baseline is unavailable; inspect the rule results below.")
+        warnings.append("Tab 4 has no preview entries. The comparison baseline is unavailable; inspect tab 4 or the saved blank-plan report for rule results.")
     for order, change in enumerate(changes):
         if change["content_source"] == "shelved":
             warnings.append(f"CL {change['number']}: shelved edits are extracted against depot head; only shelved files are included.")
@@ -435,14 +442,19 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
                     uncovered_ids = {unit["identity"] for unit in uncovered}
                     item["latest_suggestions"] = [dict(unit, operation="present", depot_source=item["latest"]["source"])
                                                   for unit in latest_units if unit["identity"] in uncovered_ids]
-                    item["missing"] = _difference(uncovered, latest_units)
-                    remaining_latest = list(item["latest_suggestions"])
+                    remaining_latest = list(latest_units)
                     for unit in uncovered:
                         index = next((i for i, other in enumerate(remaining_latest) if _signature(other) == _signature(unit)), None)
+                        if index is None and _init_command(unit):
+                            index = next((i for i, other in enumerate(remaining_latest)
+                                          if _init_command(other) == _init_command(unit)), None)
                         if index is not None:
-                            present = remaining_latest.pop(index)
+                            actual = remaining_latest[index] if _init_command(unit) else remaining_latest.pop(index)
+                            present = dict(actual, operation="present", depot_source=item["latest"]["source"], suggested=unit)
                             present["sources"] = unit["sources"]
                             item["already_present"].append(present)
+                        else:
+                            item["missing"].append(unit)
                     if empty_file_uncovered:
                         unit = {"text": "Preview includes an empty file.", "depot_source": item["latest"]["source"]}
                         item["already_present" if item["latest"]["exists"] else "missing"].append(unit)

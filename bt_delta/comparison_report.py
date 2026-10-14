@@ -61,9 +61,12 @@ def explain_file(item):
                          'reason': 'A surviving addition from ' + origins(unit) + ' matches the preview statement/value in the same file and context.',
                          'suggested': unit, 'actual': [unit]})
     for unit in item['already_present']:
-        findings.append({'status': 'already_present', 'text': unit['text'],
-                         'reason': 'The suggestion is already present in the latest depot revision checked: ' + unit['depot_source'] + '. It does not need to be introduced by a selected changelist.',
-                         'suggested': unit, 'actual': [unit]})
+        suggested = unit.get('suggested', unit)
+        reason = 'The suggestion is already present in the latest depot revision checked: ' + unit['depot_source'] + '. It does not need to be introduced by a selected changelist.'
+        if signature(suggested) != signature(unit):
+            reason += ' A file-wide search found the same init command and arguments; its actual event and line are shown below. Event equivalence is not assessed by this presence check.'
+        findings.append({'status': 'already_present', 'text': suggested['text'],
+                         'reason': reason, 'suggested': suggested, 'actual': [unit]})
     for unit in item['extra']:
         if unit.get('operation') == 'action':
             reason = 'This file operation is not represented by an add/edit suggestion in the tab-4 preview.'
@@ -91,6 +94,7 @@ def render_comparison(report):
              'MISSING means absent from both selected additions and latest depot content at the exact suggested path. Read failures are reported as errors.',
              'Submitted CLs are combined in file-revision order; pending CLs follow in input order. Other edits are excluded from CL attribution but may satisfy suggestions through latest depot content.',
              'Formatting normalization retains Make/init context and XML/JSON key paths. Binary comparisons use byte hashes.',
+             'Before marking an init command missing, the entire latest file is checked for the same active command and arguments, regardless of event or position.',
              'INCOMPLETE: inspect file errors and blocked preview-source rules.' if report['incomplete'] else 'Comparison completed.',
              f"Files: {counts['blank_plan_files']} suggested by tool (after exclusions); {counts['developer_files']} in compared CLs; {counts['extra_files']} extra; {counts['missing_files']} with missing suggestions; {counts['unreadable_files']} with errors.",
              f"Items: {counts.get('suggested_items', 0)} suggested; {counts['matched_items']} matched; {counts['already_present_items']} already present; {counts.get('missing_items', 0)} missing from selected edits and latest depot; {counts.get('extra_items', 0)} extra; {counts.get('value_differences', 0)} different values."]
@@ -117,7 +121,7 @@ def render_comparison(report):
             lines.append('  None.')
     lines.extend(['', '=' * 80, 'TAB 4 EMPTY-FILE PREVIEW BASELINE AND FILE-BY-FILE COMPARISON'])
     if not report['plan']['previews']:
-        lines.append('No preview entries were generated. Inspect the rule results below.')
+        lines.append('No preview entries were generated. Inspect the Empty-file preview tab or saved blank-plan report for rule results.')
 
     def units(title, entries, prefix):
         lines.append(title + f' ({len(entries)} item(s))')
@@ -199,7 +203,4 @@ def render_comparison(report):
         units('ALREADY PRESENT IN LATEST DEPOT suggestions', item['already_present'], 'PRESENT:')
         units('MISSING FROM SELECTED EDITS AND LATEST DEPOT suggestions', item['missing'], 'MISSING:')
         units('EXTRA developer changes', item['extra'], 'EXTRA:')
-    lines.extend(['', '=' * 80, 'PREVIEW SOURCE RULE RESULTS — INCLUDING SKIPPED, REVIEW AND BLOCKED REASONS'])
-    for check in report['plan']['checks']:
-        lines.extend([f"[{check['status'].upper()}] {check['rule']}: {check['message']}", *check['paths']])
     return '\n'.join(lines).rstrip() + '\n'

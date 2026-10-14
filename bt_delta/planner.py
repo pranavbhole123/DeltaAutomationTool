@@ -192,11 +192,14 @@ class Planner:
             self.log(f"{rule['id']}: no matching reference actions; checklist defaults will not be inserted.")
         return actions
 
-    def presence_report(self, rule, path):
+    def presence_report(self, rule, path, *, review_notes=None):
         def report(notice):
             self.log(f"{rule['id']}: file-wide presence check: {path}: {notice['message']}")
             if notice['review']:
-                self.result(rule, 'review', notice['message'], [path])
+                if review_notes is not None:
+                    review_notes.append(notice['message'])
+                else:
+                    self.result(rule, 'review', notice['message'], [path])
         return report
 
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
@@ -498,8 +501,9 @@ class Planner:
         actions = self.reference_actions(rule, reference)
         after, empty_preview = text, ""
         presence_start = len(self.results)
+        review_notes = [] if rule['id'] == 'vendor.postfs' else None
         for action in actions:
-            after = apply_reference_action(after, action, report=self.presence_report(rule, path))
+            after = apply_reference_action(after, action, report=self.presence_report(rule, path, review_notes=review_notes))
             empty_preview = apply_reference_action(empty_preview, action)
         if not empty_preview:
             self.result(rule, "skipped", "Reference has no matching statements for this rule. Checklist examples are optional; nothing is inserted.", [src, path])
@@ -507,11 +511,14 @@ class Planner:
         self.preview(rule, path, empty_preview, reference_path=src,
                      note="Bluetooth content selected from the reference; checklist examples only guide selection.")
         changed = self.propose(path, after.encode(encoding), rule)
-        review_presence = any(item['status'] == 'review' for item in self.results[presence_start:])
-        self.result(rule, "change" if changed else ("review" if review_presence else "pass"),
-                    ("Reference-selected edit proposed; existing entries were checked across the current file." if changed else
-                     "No edit proposed; existing content at other locations needs review as detailed above." if review_presence else
-                     "Already matches selected reference content."), [src, path])
+        review_presence = bool(review_notes) or any(item['status'] == 'review' for item in self.results[presence_start:])
+        status = 'review' if review_notes else ('change' if changed else ('review' if review_presence else 'pass'))
+        message = ("Reference-selected edit proposed; existing entries were checked across the current file." if changed else
+                   "No edit proposed; existing content at other locations needs review." if review_presence else
+                   "Already matches selected reference content.")
+        if review_notes:
+            message += '\n' + '\n'.join(dict.fromkeys(review_notes))
+        self.result(rule, status, message, [src, path])
 
     def verify_reference_hals(self, rule):
         reference_path = self.resolver.discover("reference", "vendor", "manifest")
@@ -530,6 +537,8 @@ class Planner:
         path = self.resolver.discover("current", "vendor", "manifest")
         self.rule_paths.append(path)
         root = ET.fromstring(decode(self.content(path))[0])
+        details = []
+        needs_review = False
         for reference_hal in reference_hals:
             name = reference_hal.findtext("name")
             reference_matches = [hal for hal in reference_hals if hal.findtext("name") == name]
@@ -537,7 +546,8 @@ class Planner:
             if len(reference_matches) != 1 or len(matches) > 1:
                 raise ValueError(f"Ambiguous Bluetooth HAL {name}: reference count={len(reference_matches)}, current count={len(matches)}; cannot choose an entry.")
             if not matches:
-                self.result(rule, "review", f"Reference HAL {name} ({reference_hal.get('format')}) is absent in current manifest. Verification only; no XML was inserted.", [reference_path, path])
+                needs_review = True
+                details.append(f"REVIEW: Reference HAL {name} ({reference_hal.get('format')}) is absent in current manifest. Verification only; no XML was inserted.")
                 continue
             current = matches[0]
             def pairs(hal):
@@ -557,9 +567,11 @@ class Planner:
             current_fq = {(item.text or "").strip() for item in current.findall("fqname")}
             if not expected_fq.issubset(current_fq):
                 differences.append(f"reference fqname entries missing from current: {sorted(expected_fq - current_fq)}")
-            self.result(rule, "review" if differences else "pass",
-                        f"Reference {reference_hal.get('format', 'unspecified')} HAL {name}: " +
-                        ("; ".join(differences) if differences else "format, transport, interfaces, fqnames and reference minimum versions match."), [reference_path, path])
+            needs_review |= bool(differences)
+            details.append(("REVIEW: " if differences else "PASS: ") +
+                           f"Reference {reference_hal.get('format', 'unspecified')} HAL {name}: " +
+                           ("; ".join(differences) if differences else "format, transport, interfaces, fqnames and reference minimum versions match."))
+        self.result(rule, "review" if needs_review else "pass", "\n".join(details), [reference_path, path])
 
     def verify_firmware(self, rule):
         current = role_settings(self.config, "current")

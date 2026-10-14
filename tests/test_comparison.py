@@ -274,12 +274,10 @@ class ComparisonTests(unittest.TestCase):
                 self.assertFalse(item['already_present'])
                 self.assertEqual(item['findings'][0]['status'], 'unreadable')
 
-    def test_latest_checks_preserve_make_guards_init_events_and_json_values(self):
+    def test_latest_checks_preserve_make_guards_and_json_values(self):
         cases = [
             ('system.packages', b'PRODUCT_PACKAGES += BluetoothAgent\n',
              b'ifdef OTHER\nPRODUCT_PACKAGES += BluetoothAgent\nendif\n'),
-            ('system.postfs', b'on post-fs-data\n    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth\n',
-             b'on boot\n    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth\n'),
             ('csc.features', b'{"BT":{"Enabled":true}}', b'{"BT":{"Enabled":false}}'),
         ]
         for rule, expected, latest in cases:
@@ -545,12 +543,65 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(result['extra'])
         self.assertTrue(result['matched'])
 
-    def test_init_command_in_wrong_event_does_not_match_blank_plan(self):
+    def test_init_command_in_other_event_is_found_in_latest_file(self):
         item = self.wanted('system.postfs')
         self.submitted(item['path'], b'on boot\n    mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth\n')
         result = self.file(self.report(), item['path'])
-        self.assertTrue(any('on post-fs-data' in unit['text'] and '/logs' in unit['text'] for unit in result['missing']))
+        self.assertFalse(any('/logs' in unit['text'] for unit in result['missing']))
+        self.assertTrue(any('on boot' in unit['text'] and '/logs' in unit['text'] for unit in result['already_present']))
         self.assertTrue(any('on boot' in unit['text'] and '/logs' in unit['text'] for unit in result['extra']))
+
+    def test_init_file_wide_presence_checks_exact_active_command_and_keeps_location(self):
+        source = copy.deepcopy(self.blank)
+        preview = next(p for p in source['previews'] if p['rule'] == 'system.postfs')
+        command = 'mkdir /data/log/bt 0770 bluetooth bluetooth'
+        preview.update(content='on post-fs-data\n    ' + command + '\n')
+        preview['content_base64'] = base64.b64encode(preview['content'].encode()).decode()
+        source['previews'] = [preview]
+        path = preview['target_path']
+        cases = [
+            (command, True),
+            ('mkdir  /data/log/bt\t0770 bluetooth bluetooth', True),
+            ('mkdir "/data/log/bt" 0770 bluetooth bluetooth # BT logs', True),
+            ('# ' + command, False),
+            ('mkdir /data/log/bt 0755 bluetooth bluetooth', False),
+            ('mkdir /data/log/bt 0770 system bluetooth', False),
+            ('mkdir /data/log/bt_other 0770 bluetooth bluetooth', False),
+        ]
+        for actual, present in cases:
+            with self.subTest(actual=actual):
+                # Far away from the expected stanza, in a different event.
+                content = ('on post-fs-data\n    mkdir /data/other 0755 root root\n' + '\n' * 80 +
+                           'on property:sys.boot_completed=1\n    ' + actual + '\n').encode()
+                self.p4.data[path] = (9, content, 'text')
+                self.p4.history[path, 9] = content
+                result = self.file(self.report(preview_plan=seal(source)), path)
+                self.assertEqual(bool(result['already_present']), present)
+                self.assertEqual(bool(result['missing']), not present)
+                self.assertFalse(result['errors'])
+                if present:
+                    finding = result['findings'][0]
+                    self.assertEqual(finding['status'], 'already_present')
+                    self.assertIn('on post-fs-data', finding['suggested']['text'])
+                    self.assertIn('on property:sys.boot_completed=1', finding['actual'][0]['text'])
+                    self.assertEqual(finding['actual'][0]['line'], 84)
+                    self.assertEqual(finding['actual'][0]['depot_source'], path + '#9')
+
+    def test_same_command_suggested_for_two_events_can_be_present_once(self):
+        source = copy.deepcopy(self.blank)
+        preview = next(p for p in source['previews'] if p['rule'] == 'system.postfs')
+        command = '    mkdir /data/log/bt 0770 bluetooth bluetooth\n'
+        preview['content'] = 'on post-fs-data\n' + command + 'on boot\n' + command
+        preview['content_base64'] = base64.b64encode(preview['content'].encode()).decode()
+        source['previews'] = [preview]
+        path = preview['target_path']
+        content = ('on post-fs-data\n' + command).encode()
+        self.p4.data[path] = (9, content, 'text')
+        self.p4.history[path, 9] = content
+        result = self.file(self.report(preview_plan=seal(source)), path)
+        self.assertFalse(result['missing'])
+        self.assertEqual(len(result['already_present']), 2)
+        self.assertEqual({unit['line'] for unit in result['already_present']}, {2})
 
     def test_json_compares_changed_keys_and_does_not_include_unchanged_non_bt_keys(self):
         item = self.wanted('csc.features')
@@ -702,6 +753,8 @@ class ComparisonTests(unittest.TestCase):
         report = self.report()
         output = save_comparison(report, Path(self.temp.name) / 'report')
         self.assertTrue(output.exists())
+        self.assertNotIn('PREVIEW SOURCE RULE RESULTS', output.read_text())
+        self.assertTrue(report['plan']['checks'])
         self.assertTrue((output.parent / 'blank-plan' / 'plan.txt').exists())
         self.assertEqual(json.loads(output.with_suffix('.json').read_text())['counts'], report['counts'])
         with self.assertRaises(ApprovalError):

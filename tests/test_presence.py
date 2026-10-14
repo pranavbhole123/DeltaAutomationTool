@@ -6,12 +6,47 @@ from pathlib import Path
 from bt_delta.blank import BlankPlanner
 from bt_delta.csc import add_missing_features
 from bt_delta.demo import fixture
-from bt_delta.planner import Planner
+from bt_delta.planner import Planner, summary
 from bt_delta.reference import copy_make_settings
 from bt_delta.transforms import transform
 
 
 class PresenceTests(unittest.TestCase):
+    def test_b28_has_one_result_with_presence_details_and_proposed_edits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p4, config = fixture(Path(directory))
+            initial = Planner(p4, config).build()
+            preview = next(item for item in initial['previews'] if item['rule'] == 'vendor.postfs')
+            target = preview['target_path']
+            commands = [line.strip() for line in preview['content'].splitlines() if line.startswith('    ')]
+            self.assertGreaterEqual(len(commands), 2)
+            revision, _, kind = p4.data[target]
+            for moved_count in (0, 1, len(commands)):
+                with self.subTest(moved_count=moved_count):
+                    content = ('on init\n' + ''.join('    ' + c + '\n' for c in commands[:moved_count]) +
+                               'on post-fs-data\n' + ''.join('    ' + c + '\n' for c in commands[moved_count:]))
+                    p4.data[target] = revision, content.encode(), kind
+                    plan = Planner(p4, config).build()
+                    checks = [c for c in plan['checks'] if c['rule'] == 'vendor.postfs']
+                    self.assertEqual(len(checks), 1)
+                    check = checks[0]
+                    self.assertEqual(check['status'], 'review' if moved_count else 'pass')
+                    self.assertEqual(summary(plan).count(check['title'] + ' (SLSI!B28)'), 1)
+                    if moved_count:
+                        self.assertIn('line 2 in [on init]', check['message'])
+                        self.assertIn(commands[0], check['message'])
+                    self.assertFalse(any(target == c['path'] and 'vendor.postfs' in c['rules'] for c in plan['changes']))
+            # A command elsewhere and an absent command must retain both review
+            # evidence and the new edit in the one result.
+            p4.data[target] = revision, ('on init\n    ' + commands[0] + '\n').encode(), kind
+            plan = Planner(p4, config).build()
+            checks = [c for c in plan['checks'] if c['rule'] == 'vendor.postfs']
+            self.assertEqual(len(checks), 1)
+            self.assertEqual(checks[0]['status'], 'review')
+            self.assertIn('edit proposed', checks[0]['message'])
+            self.assertIn('line 2 in [on init]', checks[0]['message'])
+            self.assertTrue(any(target == c['path'] and 'vendor.postfs' in c['rules'] for c in plan['changes']))
+
     def test_init_exact_command_elsewhere_preserves_file_and_reports_location(self):
         source = 'on init\r\n    # other action\r\n    chmod    0660   /dev/btpower # present\r\n\r\non boot\r\n    setprop keep yes\r\n'
         notices = []

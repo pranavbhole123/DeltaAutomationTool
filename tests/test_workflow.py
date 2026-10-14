@@ -10,7 +10,7 @@ from unittest.mock import patch
 from bt_delta.config import ConfigError, parse_details, validate
 from bt_delta.demo import fixture, demo_plan
 from bt_delta.executor import ApprovalError, ExecutionError, execute, local_bytes
-from bt_delta.planner import Planner, preview_summary, save_plan, seal, verify_seal
+from bt_delta.planner import Planner, preview_summary, save_plan, seal, summary, verify_seal
 from bt_delta.resolver import relative_for
 from bt_delta.perforce import parse_view
 from bt_delta.perforce import PerforceTimeout
@@ -227,6 +227,32 @@ class WorkflowTests(unittest.TestCase):
         check = next(c for c in plan["checks"] if c["rule"] == "vendor.hals")
         self.assertEqual(check["status"], "pass")
         self.assertIn("minimum versions", check["message"])
+
+    def test_hidl_rule_has_one_review_entry_with_all_hal_details(self):
+        manifest = next(path for path in self.p4.data if "COOSA" in path and path.endswith("/manifest.xml"))
+        original = self.p4.data[manifest]
+        for issue in ('none', 'android_version', 'samsung_missing'):
+            with self.subTest(issue=issue):
+                content = original[1]
+                if issue == 'android_version':
+                    content = content.replace(b'<version>1.0</version>', b'<version>0.9</version>', 1)
+                elif issue == 'samsung_missing':
+                    start = content.index(b'<hal format="hidl"><name>vendor.samsung.hardware.bluetooth</name>')
+                    end = content.index(b'</hal>', start) + len(b'</hal>')
+                    content = content[:start] + content[end:]
+                self.p4.data[manifest] = (original[0], content, original[2])
+                plan = self.build()
+                checks = [check for check in plan['checks'] if check['rule'] == 'vendor.hals']
+                self.assertEqual(len(checks), 1)
+                check = checks[0]
+                self.assertEqual(check['status'], 'pass' if issue == 'none' else 'review')
+                self.assertIn('android.hardware.bluetooth', check['message'])
+                self.assertIn('vendor.samsung.hardware.bluetooth', check['message'])
+                self.assertEqual(summary(plan).count(check['title'] + ' (' + check['source'] + ')'), 1)
+                self.assertEqual(len(check['paths']), 2)
+                if issue != 'none':
+                    self.assertIn('PASS:', check['message'])
+                    self.assertIn('REVIEW:', check['message'])
 
     def test_hidl_check_reports_version_below_reference_minimum(self):
         manifest = next(path for path in self.p4.data
