@@ -66,6 +66,8 @@ class App(ttk.Frame):
         self.tabs.add(self.log_tab, text="5. Live log")
         self.comparison_tab = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(self.comparison_tab, text="6. Changelist comparison")
+        self.comparison_results_tab = ttk.Frame(self.tabs, padding=10)
+        self.tabs.add(self.comparison_results_tab, text="7. Comparison results")
         self.changelist = tk.StringVar()
         self.comparison_source = tk.StringVar(value="auto")
         self.comparison_status = tk.StringVar(value="Enter developer changelists to compare with tab 4 Empty-file preview.")
@@ -172,7 +174,14 @@ class App(ttk.Frame):
         ttk.Label(self.comparison_tab, text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Uses tab 4 previews, including files that already match. If no current preview exists, generates it and displays it in tab 4.", wraplength=1000).pack(anchor="w", pady=(0, 4))
         ttk.Label(self.comparison_tab, text="Each file shows tool suggestions, developer before/after edits, combined changelist changes and detailed mismatch reasons. Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.", wraplength=1000).pack(anchor="w", pady=(0, 4))
         ttk.Label(self.comparison_tab, textvariable=self.comparison_status, wraplength=1000).pack(anchor="w", pady=(0, 6))
-        self.comparison_box = scrolledtext.ScrolledText(self.comparison_tab, wrap="none", font=("Consolas", 10), state="disabled")
+        ttk.Label(self.comparison_tab, text="Results open in tab 7. Suggestions absent from the selected edits are checked against the latest depot revision before being marked missing. bdroid_buildcfg.h is excluded.", wraplength=1000).pack(anchor="w", pady=6)
+        ttk.Button(self.comparison_tab, text="View comparison results", command=lambda: self.tabs.select(self.comparison_results_tab)).pack(anchor="w")
+        ttk.Label(self.comparison_results_tab, textvariable=self.comparison_status, wraplength=1000).pack(anchor="w", pady=(0, 6))
+        ttk.Button(self.comparison_results_tab, text="Back to comparison inputs", command=lambda: self.tabs.select(self.comparison_tab)).pack(anchor="w", pady=(0, 6))
+        horizontal = ttk.Scrollbar(self.comparison_results_tab, orient="horizontal")
+        horizontal.pack(side="bottom", fill="x")
+        self.comparison_box = scrolledtext.ScrolledText(self.comparison_results_tab, wrap="none", font=("Consolas", 10), state="disabled", xscrollcommand=horizontal.set)
+        horizontal.configure(command=self.comparison_box.xview)
         self.comparison_box.pack(fill="both", expand=True)
         for tag, foreground, background in (("diff_add", "#146c2e", "#e6f4ea"), ("diff_delete", "#b3261e", "#fce8e6"), ("diff_hunk", "#075985", "#e0f2fe")):
             self.comparison_box.tag_configure(tag, foreground=foreground, background=background)
@@ -198,7 +207,7 @@ class App(ttk.Frame):
                 for line in comparison_summary(report).splitlines(keepends=True):
                     self.comparison_box.insert("end", line, review_line_tag(line) or ())
                 self.comparison_box.configure(state="disabled")
-                self.tabs.select(self.comparison_tab)
+                self.tabs.select(self.comparison_results_tab)
                 self.comparison_status.set(f"{'Incomplete comparison' if report['incomplete'] else 'Comparison saved'}: {output}")
                 try:
                     current = digest(canonical({"config": self.get_config(), "numbers": parse_changelists(self.changelist.get()),
@@ -210,7 +219,7 @@ class App(ttk.Frame):
                 self.status.set(f"Read-only changelist comparison saved to {output}")
             self.run(lambda: compare_changelist(P4CLI(config["perforce"], progress=self.progress), config,
                                                numbers, source=source, preview_plan=preview_plan), complete,
-                     "Comparing tab 4 Empty-file preview content with edits from the selected changelists.")
+                     "Comparing tab 4 previews with selected edits and checking latest depot content for uncovered suggestions.")
         except Exception as exc:
             messagebox.showerror("Changelist comparison", str(exc))
 

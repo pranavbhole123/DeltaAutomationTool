@@ -160,7 +160,8 @@ class ComparisonTests(unittest.TestCase):
         item = self.file(report, current)
         self.assertIn('system.board', item['rules'])
         self.assertFalse(item['extra_file'])
-        self.assertTrue(any('BOARD_HAVE_BLUETOOTH' in unit['text'] for unit in item['missing']))
+        self.assertFalse(item['missing'])
+        self.assertTrue(any('BOARD_HAVE_BLUETOOTH' in unit['text'] for unit in item['already_present']))
 
     def test_tab4_preview_from_other_inputs_is_rejected(self):
         source_plan = Planner(self.p4, self.config).build()
@@ -192,14 +193,172 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(item['missing'])
         self.assertTrue(item['matched'])
 
-    def test_unchanged_statements_in_developer_file_do_not_satisfy_blank_plan(self):
+    def test_unchanged_statements_in_latest_developer_file_satisfy_suggestions(self):
         item = self.wanted('system.board')
         before = self.p4.data[item['path']][1]
         self.submitted(item['path'], before + b'# unrelated developer comment\n')
         result = self.file(self.report(), item['path'])
         self.assertFalse(result['matched'])
-        self.assertTrue(any('WLAN_CHIP' in unit['text'] for unit in result['missing']))
+        self.assertFalse(any('WLAN_CHIP' in unit['text'] for unit in result['missing']))
+        self.assertTrue(any('WLAN_CHIP' in unit['text'] for unit in result['already_present']))
         self.assertTrue(any('unrelated developer comment' in unit['text'] for unit in result['extra']))
+
+    def test_file_absent_from_cl_uses_latest_content_and_reports_only_real_gaps(self):
+        wanted = self.wanted('system.board')
+        path = wanted['path']
+        report = self.report(preview_plan=self.blank)
+        item = self.file(report, path)
+        self.assertFalse(item['in_changelists'])
+        self.assertFalse(item['matched'])
+        self.assertTrue(any('WLAN_CHIP' in unit['text'] for unit in item['already_present']))
+        self.assertTrue(any('BOARD_HAVE_BLUETOOTH := true' == unit['text'] for unit in item['missing']))
+        self.assertEqual(item['latest']['source'], path + '#1')
+        self.assertEqual(sum(unit['text'].startswith('WLAN_CHIP') for unit in item['missing']), 0)
+        self.assertEqual(report['counts']['already_present_items'], sum(len(file['already_present']) for file in report['files']))
+        self.assertEqual(report['counts']['missing_files'], sum(bool(file['missing']) for file in report['files']))
+        self.assertIn('ALREADY PRESENT IN LATEST DEPOT', comparison_summary(report))
+        self.assertNotIn('MISSING FROM CHANGELISTS', comparison_summary(report))
+
+    def test_unselected_later_submission_satisfies_gap_without_cl_attribution(self):
+        wanted = self.wanted('system.board')
+        path = wanted['path']
+        self.submitted(path, self.p4.data[path][1] + b'# selected comment\n')
+        # The supplied preview is older than this unselected submission.
+        self.submitted(path, base64.b64decode(wanted['after']), '999')
+        item = self.file(self.report(preview_plan=self.blank), path)
+        self.assertFalse(item['missing'])
+        self.assertFalse(item['matched'])
+        self.assertTrue(item['already_present'])
+        self.assertEqual(item['latest']['source'], path + '#3')
+        self.assertEqual(item['changelists'], ['100'])
+        self.assertTrue(all('changelists' not in unit for unit in item['already_present']))
+        self.assertIn((path, 3), self.p4.reads)
+
+    def test_historical_unchanged_content_removed_later_is_missing(self):
+        wanted = self.wanted('system.board')
+        path = wanted['path']
+        self.submitted(path, self.p4.data[path][1] + b'# selected comment\n')
+        self.submitted(path, b'# latest file has no board settings\n', '999')
+        item = self.file(self.report(preview_plan=self.blank), path)
+        finding = next(f for f in item['findings'] if 'WLAN_CHIP' in f['text'])
+        self.assertEqual(finding['status'], 'missing')
+        self.assertIn(path + '#3', finding['reason'])
+        self.assertFalse(item['already_present'])
+
+    def test_latest_absent_or_deleted_file_is_missing(self):
+        path = self.wanted('system.board')['path']
+        self.p4.data.pop(path)
+        item = self.file(self.report(preview_plan=self.blank), path)
+        self.assertFalse(item['errors'])
+        self.assertFalse(item['latest']['exists'])
+        self.assertTrue(item['missing'])
+        self.assertFalse(item['already_present'])
+        self.assertFalse(any(read_path == path for read_path, _ in self.p4.reads))
+
+    def test_latest_read_failures_are_errors_never_missing(self):
+        path = self.wanted('system.board')['path']
+        for failure in ('query', 'read'):
+            with self.subTest(failure=failure):
+                method = 'files' if failure == 'query' else 'read_file'
+                original = getattr(self.p4, method)
+                def failed(requested, *args):
+                    if requested == path:
+                        raise PermissionError('access denied')
+                    return original(requested, *args)
+                with patch.object(self.p4, method, side_effect=failed):
+                    report = self.report(preview_plan=self.blank)
+                item = self.file(report, path)
+                self.assertTrue(report['incomplete'])
+                self.assertIn('Latest depot content could not be checked', item['errors'][0])
+                self.assertFalse(item['missing'])
+                self.assertFalse(item['already_present'])
+                self.assertEqual(item['findings'][0]['status'], 'unreadable')
+
+    def test_latest_checks_preserve_make_guards_init_events_and_json_values(self):
+        cases = [
+            ('system.packages', b'PRODUCT_PACKAGES += BluetoothAgent\n',
+             b'ifdef OTHER\nPRODUCT_PACKAGES += BluetoothAgent\nendif\n'),
+            ('system.postfs', b'on post-fs-data\n    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth\n',
+             b'on boot\n    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth\n'),
+            ('csc.features', b'{"BT":{"Enabled":true}}', b'{"BT":{"Enabled":false}}'),
+        ]
+        for rule, expected, latest in cases:
+            with self.subTest(rule=rule):
+                source = copy.deepcopy(self.blank)
+                preview = next(p for p in source['previews'] if p['rule'] == rule)
+                preview['content'] = expected.decode()
+                preview['content_base64'] = base64.b64encode(expected).decode()
+                source['previews'] = [preview]
+                path = preview['target_path']
+                for matches in (False, True):
+                    content = expected if matches else latest
+                    self.p4.data[path] = (8, content, 'text')
+                    self.p4.history[path, 8] = content
+                    item = self.file(self.report(preview_plan=seal(source)), path)
+                    self.assertEqual(bool(item['already_present']), matches)
+                    self.assertEqual(bool(item['missing']), not matches)
+
+    def test_same_filename_in_other_branch_does_not_satisfy_latest_check(self):
+        wanted = self.wanted('system.board')
+        self.submitted('//OTHER/BoardConfigCommon.mk', base64.b64decode(wanted['after']))
+        report = self.report(preview_plan=self.blank)
+        item = self.file(report, wanted['path'])
+        self.assertTrue(any('BOARD_HAVE_BLUETOOTH := true' == unit['text'] for unit in item['missing']))
+        self.assertTrue(self.file(report, '//OTHER/BoardConfigCommon.mk')['extra_file'])
+
+    def test_fully_matched_suggestions_do_not_need_a_head_query(self):
+        wanted = self.wanted('system.board')
+        path = wanted['path']
+        self.p4.data.pop(path)
+        self.submitted(path, base64.b64decode(wanted['after']))
+        original = self.p4.files
+        def files(requested):
+            if requested == path:
+                raise AssertionError('Unnecessary latest query')
+            return original(requested)
+        with patch.object(self.p4, 'files', side_effect=files):
+            item = self.file(self.report(preview_plan=self.blank), path)
+        self.assertFalse(item['errors'])
+        self.assertFalse(item['missing'])
+        self.assertTrue(item['matched'])
+        self.assertIsNone(item['latest'])
+
+    def test_bdroid_header_is_excluded_on_both_sides_without_altering_tab4(self):
+        header = self.wanted('system.header')
+        paths = [header['path'], '//OTHER/Bluetooth/bdroid_buildcfg.h']
+        for path in paths:
+            self.submitted(path, b'# header content\n')
+            self.p4.unreadable.add(path)
+        self.p4.reads.clear()
+        report = self.report(preview_plan=self.blank)
+        self.assertFalse(report['incomplete'])
+        self.assertFalse(any(file['filename'] == 'bdroid_buildcfg.h' for file in report['files']))
+        self.assertFalse(any(path in paths for path, _ in self.p4.reads))
+        self.assertEqual(report['counts']['developer_files'], 0)
+        self.assertEqual(report['counts']['extra_files'], 0)
+        self.assertEqual(report['plan']['previews'], self.blank['previews'])
+        self.assertTrue(any(p['rule'] == 'system.header' for p in report['plan']['previews']))
+
+    def test_empty_file_preview_checks_latest_file_existence(self):
+        source = copy.deepcopy(self.blank)
+        preview = next(p for p in source['previews'] if p['rule'] == 'system.board')
+        preview.update(content='', content_base64='')
+        source['previews'] = [preview]
+        for exists in (True, False):
+            with self.subTest(exists=exists):
+                if not exists:
+                    self.p4.data.pop(preview['target_path'])
+                item = self.file(self.report(preview_plan=seal(source)), preview['target_path'])
+                self.assertEqual(bool(item['already_present']), exists)
+                self.assertEqual(bool(item['missing']), not exists)
+
+    def test_header_only_preview_is_an_excluded_comparison_not_a_failed_baseline(self):
+        source = copy.deepcopy(self.blank)
+        source['previews'] = [p for p in source['previews'] if p['rule'] == 'system.header']
+        report = self.report(preview_plan=seal(source))
+        self.assertFalse(report['incomplete'])
+        self.assertFalse(report['files'])
+        self.assertEqual(report['counts']['suggested_items'], 0)
 
     def test_multiple_changelists_fill_different_parts_of_one_blank_file(self):
         item = self.wanted('system.board')
@@ -276,7 +435,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('BENI', source['reference_path'])
         self.assertIsInstance(source['reference_revision'], int)
         self.assertTrue(source['worksheet'])
-        self.assertEqual(report['schema_version'], 3)
+        self.assertEqual(report['schema_version'], 4)
         self.assertGreater(report['counts']['value_differences'], 0)
         text = comparison_summary(report)
         self.assertIn('Tool suggests: BOARD_HAVE_BLUETOOTH := true', text)
@@ -308,11 +467,11 @@ class ComparisonTests(unittest.TestCase):
         self.submitted(wanted['path'], self.p4.data[wanted['path']][1] + b'# unrelated\n')
         item = self.file(self.report(), wanted['path'])
         finding = next(f for f in item['findings'] if 'WLAN_CHIP' in f['text'])
-        self.assertEqual(finding['status'], 'missing')
-        self.assertIn('already present and unchanged in CL 100', finding['reason'])
-        self.assertIn('not a claim that the current file lacks', finding['reason'])
-        self.assertEqual(finding['actual'][0]['operation'], 'unchanged')
-        self.assertEqual(finding['actual'][0]['changelists'], ['100'])
+        self.assertEqual(finding['status'], 'already_present')
+        self.assertIn('already present in the latest depot revision', finding['reason'])
+        self.assertEqual(finding['actual'][0]['operation'], 'present')
+        self.assertEqual(finding['actual'][0]['depot_source'], wanted['path'] + '#2')
+        self.assertNotIn('changelists', finding['actual'][0])
 
     def test_verbose_cancelled_addition_explains_both_changelists_in_revision_order(self):
         wanted = self.wanted('system.board')
@@ -519,11 +678,12 @@ class ComparisonTests(unittest.TestCase):
             self.report()
 
     def test_binary_reference_file_matches_by_bytes(self):
-        reference = next(path for path in self.p4.data if 'BENI' in path and path.endswith('/Bluetooth/bdroid_buildcfg.h') and '_sssi/' in path)
+        reference = next(path for path in self.p4.data if 'BENI' in path and '/Bluetooth/' in path and '_vendor/' in path)
+        reference = reference.rsplit('/', 1)[0] + '/config.bin'
         self.p4.data[reference] = (1, b'\x00\xff\r\n', 'binary')
         self.p4.history[reference, 1] = b'\x00\xff\r\n'
         self.blank = BlankPlanner(self.p4, self.config).build()
-        item = self.wanted('system.header')
+        item = next(item for item in self.blank['changes'] if item['path'].endswith('/config.bin'))
         self.submitted(item['path'], b'\x00\xff\r\n', file_type='binary')
         result = self.file(self.report(), item['path'])
         self.assertFalse(result['missing'])

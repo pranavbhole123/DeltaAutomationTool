@@ -1,4 +1,4 @@
-"""Compare the blank reference/checklist plan with edits from selected changelists."""
+"""Compare previews with selected edits, checking depot head before declaring gaps."""
 from __future__ import annotations
 
 import base64
@@ -24,6 +24,23 @@ from .transforms import _ASSIGNMENT, _comment, _make_statements
 
 DELETES = {"delete", "move/delete"}
 ADDS = {"add", "branch", "move/add"}
+
+
+def _excluded_header(path):
+    return path.rsplit("/", 1)[-1].lower() == "bdroid_buildcfg.h"
+
+
+def _read_latest(p4, path):
+    """Read one exact target at its current live revision, never a workspace copy."""
+    records = p4.files(path)
+    if not records:
+        return {"exists": False, "source": path + " (no live depot head)"}, []
+    if len(records) != 1 or records[0].get("depotFile") != path:
+        raise PerforceError(f"Cannot resolve a unique exact depot head for {path}")
+    record = records[0]
+    revision = _revision(record["rev"])
+    content = p4.read_file(path, revision)
+    return {"exists": True, "revision": revision, "source": f"{path}#{revision}"}, content_units(path, content, record["type"])
 
 
 def parse_changelists(values):
@@ -291,22 +308,25 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
         log("Generating reference-led empty-file previews for the comparison baseline.")
         source_plan = BlankPlanner(p4, config, catalog).build()
     plan = plan_from_previews(source_plan)
-    planned = {entry["path"]: entry for entry in plan["changes"]}
+    planned = {entry["path"]: entry for entry in plan["changes"] if not _excluded_header(entry["path"])}
     previews_by_path = {}
     snapshots = {entry['path']: entry for entry in plan.get('snapshots', [])}
     for preview in plan['previews']:
         previews_by_path.setdefault(preview['target_path'], []).append(preview)
     log(f"Baseline ready: {len(planned)} target file(s); {len(plan['previews'])} preview entries.")
     developer, pending_reads = {}, []
-    warnings = []
+    warnings = ["bdroid_buildcfg.h is excluded from changelist comparison; its normal copy-if-absent rule and tab 4 preview are unchanged."]
     if not plan["config"]["check_csc_features"]:
         warnings.append("CSC feature checks are disabled; " + CARRIER_FILENAME + " changelist entries are excluded.")
-    if not planned:
+    if not plan["previews"]:
         warnings.append("Tab 4 has no preview entries. The comparison baseline is unavailable; inspect the rule results below.")
     for order, change in enumerate(changes):
         if change["content_source"] == "shelved":
             warnings.append(f"CL {change['number']}: shelved edits are extracted against depot head; only shelved files are included.")
         for entry in change["files"]:
+            if _excluded_header(entry["path"]):
+                log(f"CL {change['number']}: header excluded from comparison: {entry['path']}")
+                continue
             if not plan["config"]["check_csc_features"] and entry["path"].rsplit("/", 1)[-1] == CARRIER_FILENAME:
                 warnings.append(f"CL {change['number']}: CSC feature file skipped: {entry['path']}")
                 log(warnings[-1])
@@ -351,7 +371,8 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
         item = {"path": path, "filename": path.rsplit("/", 1)[-1], "planned": wanted is not None,
                 "in_changelists": bool(deltas), "changelists": list(dict.fromkeys(delta["changelist"] for delta in deltas)),
                 "rules": wanted["rules"] if wanted else [], "template_paths": [],
-                "missing": [], "extra": [], "matched": [], "developer_changes": deltas, "errors": [],
+                "missing": [], "extra": [], "matched": [], "already_present": [],
+                "latest": None, "latest_suggestions": [], "developer_changes": deltas, "errors": [],
                 "suggested": [], "preview_sources": previews_by_path.get(path, []),
                 "combined_additions": [], "developer_removals": [], "cancelled_edits": [], "findings": []}
         log(f"FILE START {path}: in preview={wanted is not None}; CL order=" + (', '.join(delta['changelist'] for delta in deltas) or 'file absent from selected CLs'))
@@ -365,7 +386,7 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
         item["outside_templates"] = not item["template_paths"]
         item["extra_file"] = bool(deltas and not wanted)
         item["errors"] = [f"CL {delta['changelist']}: {delta['error']}" for delta in deltas if delta["error"]]
-        if not planned:
+        if not plan["previews"]:
             item["extra_file"] = False
             item["errors"].append("No tab-4 preview baseline is available; this file cannot be classified.")
         try:
@@ -392,7 +413,7 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
             signatures = {_signature(unit) for unit in expected}
             for delta in deltas:
                 delta['unchanged_suggestions'] = [unit for unit in delta.pop('_unchanged', []) if _signature(unit) in signatures]
-            item["missing"] = _difference(expected, additions)
+            uncovered = _difference(expected, additions)
             item["extra"] = _difference(additions, expected)
             remaining = list(additions)
             for unit in expected:
@@ -405,24 +426,49 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
             added_ids = {unit["identity"] for unit in additions}
             item["extra"].extend(unit for unit in removals if unit["identity"] not in expected_ids or unit["identity"] not in added_ids)
             item["developer_removals"] = removals
-            if wanted and not expected and not item["errors"] and (not deltas or not deltas[-1].get("exists_after")):
-                item["missing"].append({"text": "Blank plan includes this empty file; it was not supplied by the selected changelists."})
+            empty_file_uncovered = wanted and not expected and (not deltas or not deltas[-1].get("exists_after"))
+            if (uncovered or empty_file_uncovered) and not item["errors"]:
+                try:
+                    log(f"Checking latest depot content for uncovered suggestions: {path}")
+                    item["latest"], latest_units = _read_latest(p4, path)
+                    log(f"Latest comparison source: {item['latest']['source']}")
+                    uncovered_ids = {unit["identity"] for unit in uncovered}
+                    item["latest_suggestions"] = [dict(unit, operation="present", depot_source=item["latest"]["source"])
+                                                  for unit in latest_units if unit["identity"] in uncovered_ids]
+                    item["missing"] = _difference(uncovered, latest_units)
+                    remaining_latest = list(item["latest_suggestions"])
+                    for unit in uncovered:
+                        index = next((i for i, other in enumerate(remaining_latest) if _signature(other) == _signature(unit)), None)
+                        if index is not None:
+                            present = remaining_latest.pop(index)
+                            present["sources"] = unit["sources"]
+                            item["already_present"].append(present)
+                    if empty_file_uncovered:
+                        unit = {"text": "Preview includes an empty file.", "depot_source": item["latest"]["source"]}
+                        item["already_present" if item["latest"]["exists"] else "missing"].append(unit)
+                except PerforceTimeout:
+                    raise
+                except Exception as exc:
+                    item["errors"].append("Latest depot content could not be checked: " + str(exc))
             for delta in deltas:
                 if delta["action"] not in ("edit", "add"):
                     item["extra"].append({"operation": "action", "text": "Developer action: " + delta["action"], "changelists": [delta["changelist"]]})
             item["blank_content"] = wanted["diff"] if wanted else ""
+        except PerforceTimeout:
+            raise
         except Exception as exc:
             item["errors"].append("Blank content comparison: " + str(exc))
         if item["errors"]:
             item["matched"] = []
             item["missing"] = []
             item["extra"] = []
+            item["already_present"] = []
         for delta in deltas:
             delta.pop('_unchanged', None)
         explain_file(item)
         for finding in item['findings']:
             log(f"{finding['status'].upper()} {path}: {finding['text']}; reason={finding['reason']}")
-        log(f"FILE END {path}: suggested={len(item['suggested'])}; matched={len(item['matched'])}; missing={len(item['missing'])}; extra={len(item['extra'])}; errors={len(item['errors'])}.")
+        log(f"FILE END {path}: suggested={len(item['suggested'])}; matched={len(item['matched'])}; already present={len(item['already_present'])}; missing={len(item['missing'])}; extra={len(item['extra'])}; errors={len(item['errors'])}.")
         results.append(item)
     for change in changes:
         log(f"Rechecking CL {change['number']} metadata for changes during comparison.")
@@ -435,21 +481,22 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
         if digest(content) != expected_hash:
             raise PerforceError(f"CL {number} file content changed during comparison: {path}")
     counts = {"changelists": len(changes), "blank_plan_files": len(planned),
-              "preview_rules": len({preview["rule"] for preview in plan["previews"]}), "developer_files": len(developer),
-              "missing_from_changelists": sum(bool(item["missing"]) for item in results),
+              "preview_rules": len({preview["rule"] for preview in plan["previews"] if not _excluded_header(preview["target_path"])}), "developer_files": len(developer),
+              "missing_files": sum(bool(item["missing"]) for item in results),
               "extra_files": sum(item["extra_file"] for item in results),
               "extra_changes": sum(bool(item["extra"]) for item in results),
               "matched_items": sum(len(item["matched"]) for item in results),
+              "already_present_items": sum(len(item["already_present"]) for item in results),
               "unreadable_files": sum(bool(item["errors"]) for item in results)}
     counts.update(suggested_items=sum(len(item['suggested']) for item in results),
                   missing_items=sum(len(item['missing']) for item in results),
                   extra_items=sum(len(item['extra']) for item in results),
                   value_differences=sum(finding['status'] == 'different_value' for item in results for finding in item['findings']))
     log("END: " + json.dumps(counts))
-    return {"schema_version": 3, "run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(), "changelists": changes,
-            "comparison_basis": "Tab 4 Empty-file preview versus changes introduced by the selected changelists.",
+    return {"schema_version": 4, "run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(), "changelists": changes,
+            "comparison_basis": "Tab 4 Empty-file preview versus selected changelist edits, with latest depot content checked for uncovered suggestions.",
             "warnings": warnings + mapping_errors, "counts": counts, "files": results, "plan": plan,
-            "incomplete": bool(not planned or mapping_errors or counts["unreadable_files"] or any(check["status"] == "blocked" for check in plan["checks"]))}
+            "incomplete": bool(not plan["previews"] or mapping_errors or counts["unreadable_files"] or any(check["status"] == "blocked" for check in plan["checks"]))}
 
 
 def comparison_summary(report):

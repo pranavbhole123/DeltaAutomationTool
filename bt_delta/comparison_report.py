@@ -13,6 +13,8 @@ def origins(unit):
         parts.append('line ' + str(unit['line']))
     if unit.get('sources'):
         parts.append('rules ' + ', '.join(dict.fromkeys(source['rule'] for source in unit['sources'])))
+    if unit.get('depot_source'):
+        parts.append('depot ' + unit['depot_source'])
     return '; '.join(parts)
 
 
@@ -27,11 +29,14 @@ def explain_file(item):
     for wanted in item['missing']:
         actual = [unit for unit in item['combined_additions']
                   if wanted.get('identity') and unit['identity'] == wanted['identity'] and unit['value'] != wanted['value']]
+        latest_values = [unit for unit in item['latest_suggestions']
+                         if wanted.get('identity') and unit['identity'] == wanted['identity'] and unit['value'] != wanted['value']]
+        actual.extend(latest_values)
         status = 'different_value' if actual else 'missing'
         if actual:
-            reason = 'The selected changelists introduce a different value for the same setting/key and context. The suggested value is missing and the developer value is also reported as extra.'
+            reason = 'A different value exists for the same setting/key and context in the selected edits or latest depot revision; the evidence below identifies its source.'
         elif not item['in_changelists']:
-            reason = 'This file does not appear in any selected changelist, so none of its preview suggestions were introduced by those changes.'
+            reason = 'This file does not appear in any selected changelist.'
         elif any(signature(wanted) == signature(unit) for unit in item['developer_removals']):
             actual = [unit for unit in item['developer_removals'] if signature(wanted) == signature(unit)]
             reason = 'The selected changelists remove this suggested content instead of introducing it.'
@@ -44,15 +49,20 @@ def explain_file(item):
                 reason = 'An earlier selected changelist added this content, but a later selected changelist removed it; it does not survive in the combined additions.'
                 actual = [unit for event in cancelled for unit in (event['earlier'], event['later'])]
             elif unchanged:
-                reason = 'This content was already present and unchanged in CL ' + ', '.join(dict.fromkeys(number for number, unit in unchanged)) + '. It was not introduced by that edit. This is a comparison of selected edits, not a claim that the current file lacks the content.'
+                reason = 'This content was unchanged in the historical CL ' + ', '.join(dict.fromkeys(number for number, unit in unchanged)) + ', but is absent from the latest depot revision.'
                 actual = [dict(unit, operation='unchanged', changelists=[number]) for number, unit in unchanged]
             else:
                 reason = 'No surviving addition from the selected changelists matches this preview statement/value in the same file and context.'
+        reason += ' Missing: no surviving selected addition matches, and the suggestion is absent from ' + item['latest']['source'] + '.'
         findings.append({'status': status, 'text': wanted['text'], 'reason': reason,
                          'suggested': wanted, 'actual': actual})
     for unit in item['matched']:
         findings.append({'status': 'matched', 'text': unit['text'],
                          'reason': 'A surviving addition from ' + origins(unit) + ' matches the preview statement/value in the same file and context.',
+                         'suggested': unit, 'actual': [unit]})
+    for unit in item['already_present']:
+        findings.append({'status': 'already_present', 'text': unit['text'],
+                         'reason': 'The suggestion is already present in the latest depot revision checked: ' + unit['depot_source'] + '. It does not need to be introduced by a selected changelist.',
                          'suggested': unit, 'actual': [unit]})
     for unit in item['extra']:
         if unit.get('operation') == 'action':
@@ -77,13 +87,13 @@ def render_comparison(report):
              report['comparison_basis'], 'Comparison run: ' + report.get('run_id', 'saved report'),
              'Model: ' + report['plan']['config']['model'],
              'Read-only. Suggestions below are the content to add to blank files in tab 4, including files needing no edit in the regular plan.',
-             'Only edits introduced by selected changelists count as matches. Existing unchanged content is identified explicitly.',
-             'Missing items describe coverage by these changelists; they do not establish that the current template is incomplete.',
-             'Submitted CLs are combined in file-revision order; pending CLs follow in input order. Unselected intermediate edits are excluded.',
+             'MATCHED means covered by selected edits. ALREADY PRESENT means found in the latest depot revision checked, even when absent from the selected edits.',
+             'MISSING means absent from both selected additions and latest depot content at the exact suggested path. Read failures are reported as errors.',
+             'Submitted CLs are combined in file-revision order; pending CLs follow in input order. Other edits are excluded from CL attribution but may satisfy suggestions through latest depot content.',
              'Formatting normalization retains Make/init context and XML/JSON key paths. Binary comparisons use byte hashes.',
              'INCOMPLETE: inspect file errors and blocked preview-source rules.' if report['incomplete'] else 'Comparison completed.',
-             f"Files: {counts['blank_plan_files']} suggested by tool; {counts['developer_files']} in compared CLs; {counts['extra_files']} extra; {counts['missing_from_changelists']} with uncovered suggestions; {counts['unreadable_files']} with errors.",
-             f"Items: {counts.get('suggested_items', 0)} suggested; {counts['matched_items']} matched; {counts.get('missing_items', 0)} missing from selected edits; {counts.get('extra_items', 0)} extra; {counts.get('value_differences', 0)} different values."]
+             f"Files: {counts['blank_plan_files']} suggested by tool (after exclusions); {counts['developer_files']} in compared CLs; {counts['extra_files']} extra; {counts['missing_files']} with missing suggestions; {counts['unreadable_files']} with errors.",
+             f"Items: {counts.get('suggested_items', 0)} suggested; {counts['matched_items']} matched; {counts['already_present_items']} already present; {counts.get('missing_items', 0)} missing from selected edits and latest depot; {counts.get('extra_items', 0)} extra; {counts.get('value_differences', 0)} different values."]
     for role in ('current', 'reference'):
         config = report['plan']['config'][role]
         lines.append(f"{role.capitalize()} templates: system={config['system_template']}; vendor={config['vendor_template']}")
@@ -96,8 +106,9 @@ def render_comparison(report):
     for label, selected in (
         ('EXTRA FILES', lambda item: item['extra_file']),
         ('EXTRA CHANGES', lambda item: bool(item['extra']) and not item['extra_file']),
-        ('MISSING FROM CHANGELISTS', lambda item: bool(item['missing'])),
+        ('MISSING FROM SELECTED EDITS AND LATEST DEPOT', lambda item: bool(item['missing'])),
         ('MATCHED', lambda item: bool(item['matched'])),
+        ('ALREADY PRESENT IN LATEST DEPOT', lambda item: bool(item['already_present'])),
         ('UNREADABLE', lambda item: bool(item['errors']))):
         matches = [item['path'] for item in report['files'] if selected(item)]
         lines.append(label + ': ' + str(len(matches)) + ' file(s)')
@@ -167,20 +178,26 @@ def render_comparison(report):
             earlier, later = event['earlier'], event['later']
             lines.append(f"  {earlier['text']}: {earlier['operation'].upper()} [{origins(earlier)}] cancelled by {later['operation'].upper()} [{origins(later)}].")
         lines.extend(['', '4. SUGGESTION VERSUS DEVELOPER RESULT, WITH REASONS'])
+        if item['latest']:
+            lines.append('Latest depot checked for uncovered suggestions: ' + item['latest']['source'])
+        elif item['planned'] and not item['errors']:
+            lines.append('Latest depot check not needed: selected additions cover the suggestions.')
         for finding in item['findings']:
             lines.append(f"[{finding['status'].upper()}] {finding['text']}")
             if finding['suggested']:
                 lines.append('  Tool suggests: ' + finding['suggested']['text'])
             if finding['actual']:
                 for actual in finding['actual']:
-                    lines.append('  Developer ' + actual.get('operation', 'change') + ': ' + actual['text'] + ' [' + origins(actual) + ']')
+                    label = '  Latest depot' if actual.get('depot_source') else '  Developer ' + actual.get('operation', 'change')
+                    lines.append(label + ': ' + actual['text'] + ' [' + origins(actual) + ']')
             else:
                 lines.append('  Matching developer addition: none, or unavailable — see reason.')
             lines.append('  Reason: ' + finding['reason'])
         if item['errors']:
             lines.append('Classification is incomplete; successful reads above are evidence only, not complete match/missing/extra findings.')
         units('MATCHED suggestions', item['matched'], 'MATCH:')
-        units('MISSING FROM CHANGELISTS suggestions', item['missing'], 'MISSING:')
+        units('ALREADY PRESENT IN LATEST DEPOT suggestions', item['already_present'], 'PRESENT:')
+        units('MISSING FROM SELECTED EDITS AND LATEST DEPOT suggestions', item['missing'], 'MISSING:')
         units('EXTRA developer changes', item['extra'], 'EXTRA:')
     lines.extend(['', '=' * 80, 'PREVIEW SOURCE RULE RESULTS — INCLUDING SKIPPED, REVIEW AND BLOCKED REASONS'])
     for check in report['plan']['checks']:
