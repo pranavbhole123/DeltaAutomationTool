@@ -157,7 +157,7 @@ class TransformTests(unittest.TestCase):
         source = ("on post-fs-data\n    mkdir /data/unrelated 0755 root root\n\n"
                   "on post-fs-data\n    # Fix bluetooth configuration permissions\n")
         action = {"type": "init_commands", "event": "on post-fs-data",
-                  "commands": ["mkdir /data/misc/bluetooth 0770 bluetooth bluetooth"]}
+                  "commands": ["mkdir /data/misc/bluetooth 0770 bluetooth bluetooth"], "context_patterns": ["(?i)bluetooth"]}
         result = self.assert_idempotent(source, action)
         self.assertIn("# Fix bluetooth configuration permissions\n    mkdir /data/misc/bluetooth", result)
 

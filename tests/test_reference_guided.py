@@ -137,7 +137,8 @@ class ReferenceGuidedTests(unittest.TestCase):
         check = self.checks(plan, 'vendor.hals')[0]
         self.assertEqual(check['status'], 'skipped')
         self.assertIn(self.config['reference']['vendor_template'], check['message'])
-        self.assertIn('/EXYNOS/android/device/samsung/erd8835/manifest.xml', check['message'])
+        self.assertIn('/EXYNOS[0-9]*/android/', check['message'])
+        self.assertIn('device/samsung/erd8835/manifest.xml', check['message'])
         self.assertIn('No p4 files query was made', check['message'])
 
     def test_reference_aidl_only_does_not_require_checklist_hidl_entries(self):
@@ -161,7 +162,7 @@ class ReferenceGuidedTests(unittest.TestCase):
         del self.p4.data[self.path('current', '/manifest.xml')]
         check = self.checks(Planner(self.p4, self.config).build(), 'vendor.hals')[0]
         self.assertEqual(check['status'], 'skipped')
-        self.assertIn('no selected Bluetooth', check['message'])
+        self.assertIn('no selected XML', check['message'])
 
     def test_missing_hcf_files_report_folder_and_leave_makefile_unchanged(self):
         hcf = self.path('reference', '/bt.hcf')
@@ -222,7 +223,8 @@ class ReferenceGuidedTests(unittest.TestCase):
         plan = Planner(self.p4, self.config).build()
         reference = self.path('reference', '/BoardConfigCommon.mk', True)
         log = '\n'.join(self.messages)
-        self.assertIn('START normal plan: model=m36x', log)
+        self.assertIn('START normal plan: rules=slsi', log)
+        self.assertIn('Resolved reference.model=m36x', log)
         self.assertIn('reference.vendor template=DEMO_VENDOR_REFERENCE', log)
         self.assertIn('Content cache reused: ' + reference + '#1', log)
         self.assertIn('vendor.board: reference source=' + reference, log)

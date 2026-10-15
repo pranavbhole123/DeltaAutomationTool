@@ -1,158 +1,93 @@
-# SLSI Bluetooth Delta
+# Delta Automation
 
-A separate Python 3.10+ tool based on the supplied SLSI checklist. The old `src` and CSV rules are not imported. All new code is in this folder. No Python packages need installing; the desktop interface uses Tkinter. Live operation requires the Perforce command-line client and an existing logged-in, mapped workspace.
+A Python 3.10+ desktop and command-line tool for comparing reference files with a current Perforce template, proposing focused edits, and applying reviewed changes to a pending changelist.
 
-## Architecture
+**One JSON file defines a rule pack:** inputs, sources, file routes, derived values, selectors, conditions, operations and comparison policies. Python provides reusable parsing, discovery and editing operations. Selecting another pack does not require changing Python or registering its rule IDs.
 
-[View the architecture diagram](docs/architecture.md) ([SVG](docs/architecture.svg), [Mermaid source](docs/architecture.mmd)).
+Bundled packs:
+
+| JSON | Scope |
+| --- | --- |
+| [slsi.json](checklist/slsi.json) | Existing SLSI Bluetooth workflow, migrated to schema 2 |
+| [qcom-wcn.json](checklist/qcom-wcn.json) | QCOM-WCN worksheet |
+| [qcom-qca.json](checklist/qcom-qca.json) | QCOM-QCA worksheet, including explicit removal rules |
+| [camera-rules.json](examples/camera-rules.json) | Synthetic non-Bluetooth example demonstrating independent inputs, paths and rules |
+
+See [rule authoring](docs/rules.md), [worksheet coverage](CHECKLIST_COVERAGE.md), and the [architecture diagram](docs/architecture.md).
 
 ## Run
 
-Double-click `start.bat`, or run `python main.py` from this folder.
+No third-party Python packages are required. The GUI needs Tkinter. Live use needs the `p4` executable, an existing login ticket and a mapped writable workspace.
 
-1. Enter current and reference system/vendor template names. **Check CSC features** is unchecked by default; select it and supply both CSC depot paths to include carrier feature files. Your M36X example is prefilled. Tab 1 also contains model, optional chipset and current build log inputs, JDM selection and exact depot overrides.
-2. In **2. Perforce**, enter Perforce server, user and workspace. Authenticate separately using your normal `p4 login`; the tool does not store passwords or log in automatically.
-3. Enter the model and optionally the chipset/current build log in tab 1. Select JDM if applicable. AP, HCF folder and TARGET_PRODUCT values are inferred; existing values loaded from JSON inputs are preserved.
-4. Generate a plan. This uses only read operations on Perforce and writes the plan locally.
-5. **3. Review & approve** shows each check status and reference/current filenames, followed by the exact proposed edits. **8. Detailed report** contains full paths and all explanations, including REVIEW and BLOCKED reasons; it is also saved as `plan.txt` alongside `plan.json`. Review those reasons and the diffs, tick the review checkbox, then apply to a pending changelist. BLOCKED items remain untouched.
+```sh
+python main.py
+# Or double-click start.bat on Windows.
+```
 
-The result is a dedicated **pending** changelist. Nothing is submitted automatically. Build and perform the phone checks listed in the plan afterwards.
+1. In **1. Project inputs**, select a JSON pack or use **Browse**. Fields come from that file. Drop additional packs into `checklist/` and click **Reload** to refresh the picker, or browse to a JSON anywhere.
+2. In **2. Perforce**, enter server, user and workspace. Authenticate separately with your normal `p4 login`; passwords are not requested or stored.
+3. **Generate plan** performs read-only inspection. It records exact revisions, content and proposed diffs locally.
+4. **3. Review & approve** shows statuses, reference/current filenames and proposed edits. **8. Detailed report** contains the full reasons and evidence, including unresolved checks. Read both before applying.
+5. Apply the reviewed plan to a dedicated **pending changelist**. The tool never automatically shelves or submits. The execution journal records the changelist and per-file progress.
 
-Try **Offline demo** to inspect the interface without credentials. Demo data is synthetic, and demo plans cannot be applied. It does not establish real M36X chipset or firmware facts.
+**4. Empty-file preview** shows selected reference/literal content even when the current file already matches. It is inspection material, not another set of edits to apply. **5. Live log** shows discovery, derived inputs and Perforce requests. **6. Changelist comparison** contains comparison controls; **7. Comparison results** displays the full report.
+
+Changing inputs or the loaded JSON invalidates approval. A JSON changed on disk must be reloaded. An invalid selected pack reports an error; it does not silently run the SLSI pack instead.
+
+The SLSI pack keeps the optional current build log, JDM and CSC controls. Log identifiers supplement **current** routing only; reference routing remains independent. CSC checks are off by default. Firmware checks verify the configured family/path exists in the mapped depot; they do not read or hash firmware binaries. Content hashes used for reviewed edit integrity and binary-copy comparison are separate from firmware presence checks.
 
 ## Command line
 
-The GUI opens a **Live log** tab while working. It shows each Perforce request and its duration. Both GUI and CLI append diagnostics to `new/runtime.log`. Requests time out after 30 seconds by default; a timeout stops remaining planning checks. JSON connection setting `timeout_seconds` can override this for a known slow server. File discovery uses target-path suffixes instead of scanning every matching basename in a branch.
+```sh
+# Validate a rule file without contacting Perforce.
+python main.py validate-rules checklist/qcom-wcn.json
 
-```powershell
+# Synthetic offline example; its plan cannot be applied.
 python main.py demo --out reports/demo
-python main.py plan examples/m36x.json --out reports/my-review
-python main.py apply reports/my-review/plan.json --approve FULL_SHA256_FROM_PLAN --acknowledge-reviews
+
+# Use a rule file explicitly, or save rules_file in the inputs JSON.
+python main.py plan examples/m36x.json --catalog checklist/slsi.json --out reports/review
+python main.py plan my-inputs.json --catalog checklist/qcom-qca.json --out reports/qca
+
+# Compare one or more changelists.
+python main.py compare my-inputs.json 123456 123457 --catalog checklist/qcom-wcn.json --out reports/comparison
+
+# Apply only the exact reviewed saved plan.
+python main.py apply reports/review/plan.json --approve FULL_DIGEST_FROM_PLAN --acknowledge-reviews
+```
+
+Fill your own connection/template values before live use. `examples/m36x.json` is a SLSI input example. [camera-inputs.json](examples/camera-inputs.json) shows a different input schema and a relative `rules_file` path, resolved relative to the inputs file.
+
+`--acknowledge-reviews` acknowledges REVIEW findings. BLOCKED checks prevent CLI application unless `--acknowledge-blocked` explicitly requests applying the other planned edits while leaving blocked checks untouched. The GUI review checkbox acknowledges both categories. No acknowledgement invents a fix for an unresolved check.
+
+Plans save `plan.json`, `plan.txt` (detailed reasons and diffs), and `empty-file-previews.txt`. Comparisons save `comparison.json` and `comparison.txt`. Apply writes an execution journal. GUI and CLI append diagnostics to `runtime.log`; Perforce requests default to a 30-second timeout, configurable through `perforce.timeout_seconds`.
+
+## Changelist comparison
+
+Comparison reuses the displayed preview only when its rules and inputs still match; otherwise it regenerates the preview. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
+
+| Result | Meaning |
+| --- | --- |
+| Matched | Surviving selected edits introduce the suggestion, or perform a declared removal |
+| Already present in latest depot | Latest target content satisfies an uncovered suggestion; for removal rules, selected content is already absent |
+| Missing | No selected addition matches and latest content does not satisfy the addition; for removal rules, selected content still remains in latest |
+| Extra files | CL paths with no generated comparable requirement at that exact depot path |
+| Extra changes | CL additions/removals outside the generated requirements; this does not by itself mean the developer change is wrong |
+| Unreadable/blocked | Evidence could not be obtained or interpreted; it is not counted as missing |
+
+Latest checks read a pinned live depot revision, not a local workspace copy or old planning snapshot. File identity is the exact depot path: another branch containing the same basename is a different file. For init files with `latest_scope: "file"`, the whole file is searched before calling a command missing, including other events. This is a presence check and does not prove those events are interchangeable at runtime.
+
+Make list members, conditional contexts and XML/JSON key paths are retained. XML/JSON files may opt into `mode: "requirements"` so declared minimum-version or missing-key merge semantics govern latest-file satisfaction. Other files use the selected preview content. Required removals are evaluated with the rule's removal selector. Comments may appear as extra changes; original diffs are always retained.
+
+Submitted CL edits use each file's revision and preceding revision, combined in file-revision order. Pending CLs follow in input order. `--source` accepts `auto`, `submitted`, `shelved`, or `workspace`. Shelves are compared against depot head; unshelved workspace edits use the have revision and must belong to the configured local workspace. Unselected edits are never attributed to selected CLs, but may satisfy requirements through latest depot content.
+
+## Verification and limits
+
+```sh
 python -m unittest discover -s tests -v
+python -m compileall -q bt_delta tests
 ```
 
-Fill connection and model-specific fields in your own copy of `examples/m36x.json`. `--acknowledge-reviews` explicitly confirms review of every REVIEW item. A digest mismatch or any BLOCKED item prevents execution. Inputs changing after GUI planning disable approval until a matching plan is generated.
+Tests cover routing/exclusions, conditional Make statements, XML/JSON editing, comparison, stale-plan protection, mock application, all three bundled packs and the independent camera pack. SLSI proposed bytes are compared against saved pre-refactor synthetic baseline outputs. Tkinter tests need Tk and a display and otherwise skip.
 
-Each report contains `plan.txt` (readable summary and unified diffs), `empty-file-previews.txt` (file-wise reference/checklist content the rule would use for an empty target), and `plan.json` (exact content, hashes, revisions, input and mapping snapshots). The GUI colors added diff lines green and removed lines red, and shows the same inspection-only material in **4. Empty-file preview**. Execution creates a separate journal with the changelist number, per-file progress, and acknowledged blocked checks. It creates a pending changelist but never shelves or submits it. Report files contain depot content, so keep them with your project data.
-
-Rules use checklist hints plus editable selectors to identify Bluetooth content in the reference. Absent reference content is not inserted from checklist defaults. `key_patterns`, `reference_package_patterns`, `reference_line_patterns`, `reference_command_patterns`, `reference_comment_patterns`, and HAL `name_patterns` select statements from the corresponding reference file. Conditional `PRODUCT_PACKAGES +=` entries are copied with their enclosing conditions, including nested and else branches. Before adding a package, the tool checks the whole current file; existing entries under different conditions are preserved and reported for review. Conditional assignment/include edits still require review. Init discovery stays inside the configured event and can use comments such as `# Bluetooth`, `# BT`, and `# A2DP` to identify model-specific command blocks. Edit these selectors in `checklist/slsi.json` when naming conventions change.
-
-## Compare bring-up changelists with the blank plan
-
-Open **6. Changelist comparison**, enter one or more developer changelists separated by commas or spaces (for example `123456, 123457, 123458`), and set the current/reference system and vendor templates and CSC roots. Template fields are shared with tab 1; model and exact path overrides use tab 1; Perforce connection settings use tab 2. Click **Compare with Empty-file preview**. The report opens automatically in **7. Comparison results**, a separate tab with a full-height report area and horizontal/vertical scrolling. Tab 6 retains the comparison inputs.
-
-The comparison baseline is the file content shown in **4. Empty-file preview**, including previews for files that already match and need no proposed edits. When the displayed preview belongs to the same inputs, the comparison reuses those exact entries instead of generating a separate plan. Otherwise it generates reference/checklist previews and displays them in tab 4. Entries are grouped by their target paths, with every contributing rule ID preserved; repeated statements from multiple previews are compared once. Reference folder files (except `bdroid_buildcfg.h`), selected board statements, packages/includes, feature values, init commands, the reference HCF filter block and, when **Check CSC features** is selected, carrier JSON keys from every reference region are included. HAL/device checks are listed as manual items; firmware checks verify the mapped current path exists. These checks contribute no blank write content.
-
-The report compares this blank-file content with the edits introduced by the selected changelists at each exact depot path. For suggestions not covered by those edits, it queries the latest live depot revision and reads that specific revision. It does not reuse older plan snapshots or local workspace content for this presence check. `bdroid_buildcfg.h` is excluded on both sides of comparison; its normal copy-if-absent behavior and tab 4 preview are unchanged.
-
-The result categories are:
-
-- **Extra files:** developer files absent from the blank plan, including files outside the selected template mappings.
-- **Extra changes:** developer statements/values absent from the blank plan, including additional edits inside a planned file.
-- **Already present in latest depot:** suggestions not introduced by the selected changes but present in the latest depot revision checked. The report records the exact path, revision and line where available.
-- **Missing from selected edits and latest depot:** suggestions absent from both sources at the exact target path, including absent/deleted target files. A file being absent from a CL alone does not make its suggestions missing.
-- **Matched:** blank-plan items introduced by those changes, with contributing changelist numbers.
-- **Unreadable/blocked:** incomplete comparisons requiring follow-up. Unreadable file content is not classified as a match or a missing item.
-
-Multiple changelists are combined per file. Submitted edits are processed in file-revision order, even if the numbers are entered in a different order. Content added in one selected changelist and removed/replaced in a later selected changelist is cancelled or superseded. Unselected edits are not attributed to the selected changelists, but their content can satisfy a suggestion through the latest depot check. Each changelist's original diff remains in the report. Pending edits follow submitted edits, in the order entered.
-
-Choose a content source, or leave **auto** selected:
-
-- **submitted:** extracts each file's own submitted edit using its submitted revision and preceding file revision. The blank plan always uses latest reference content; no historical template plan is generated.
-- **shelved:** reads a developer's shelved file contents, including another workspace's shelf. Its edits are extracted against depot head, so old shelves can include differences from later submissions. Only shelved files are included.
-- **workspace:** extracts unshelved edits from the configured local workspace against each file's have revision. Files must still be open in the specified changelist. Remote unshelved work must be shelved first.
-- **auto:** selects the appropriate source for each changelist independently, allowing a mixture of submitted and pending changelists.
-
-Comparison ignores line endings and outer whitespace. Make packages are compared by package name so additions to multiline lists can match a single-line blank statement. Changelist diffs retain init event context. Before declaring an init command missing, the latest-file presence check searches the entire file across all events for the same active command and arguments. Indentation, whitespace, quotes and trailing comments are normalized; commented-out commands and different arguments do not count. Findings show the actual event and line where the command was found. Make statements retain conditional context, and XML/JSON feature values retain their element/key paths. Comments are included. The report compares statement/value membership, not runtime behavior or semantic equivalence of arbitrary Make expressions. Binary content is compared by bytes and hashes. Raw diffs retain all original edits and ordering. Pending metadata and content are checked again before reporting.
-
-The report groups details by filename under **TAB 4 EMPTY-FILE PREVIEW BASELINE AND FILE-BY-FILE COMPARISON**. The comparison report omits the Preview source rule results appendix; those checks remain available in tab 4 and the saved blank-plan reports. Each file shows four sections: what the tool suggests adding, what each changelist actually changed, the combined effect of the selected changelists, and suggestion-versus-developer results with detailed reasons. Suggestions identify their rule, worksheet cell, reference path/revision and preview line. Developer evidence includes the exact before/after source revisions, original diffs, added/new values, removed/old values, unchanged suggestions and edits cancelled by later changelists. Wrong values are shown side by side. Uncovered suggestions receive a latest-depot check, whose source revision and already-present/missing findings appear in the fourth section. Failed queries, unreadable revisions or content extraction errors produce incomplete/error results, never missing findings. File counts and statement/value counts are listed separately. The same comparison progress, paths, sources and findings are logged in Live log and runtime.log; comparison.json also preserves this structured evidence (schema version 4, with `already_present` and `latest` per file, and `missing_files` replacing the old `missing_from_changelists` count). The tool saves `comparison.txt`, `comparison.json`, and a `blank-plan/` folder containing this inspection-only preview baseline. If no preview entries can be generated, the report is incomplete and explains the rule failures; it does not classify all developer files as extra. Comparison plans are inspection-only and cannot be applied. Comparison never syncs, opens, shelves or submits files, and it does not replace the regular apply plan.
-
-```powershell
-python main.py compare examples/m36x.json 123456 123457 123458 --out reports/bringup-comparison
-```
-
-CLI exit status is 2 for an incomplete comparison, 1 for an operation failure and 0 for a complete report; complete reports may still contain differences.
-
-## How paths are resolved
-
-The Bluetooth header also uses only the mapped `EXYNOS/.../device/<common_device>/` folder. Change or add relative candidates in `checklist/slsi.json`:
-
-```json
-"path_rules": {
-  "system": {
-    "bluetooth_header": {
-      "anchor": "/EXYNOS/",
-      "relative": "{model}_sssi/device/{common_device}/Bluetooth/bdroid_buildcfg.h"
-    }
-  }
-}
-```
-
-Each path is relative to the model-common folder. `{model}` and `{common_device}` placeholders are supported if needed in a future filename/subfolder. The branch and model folder come from the template View. Only these exact candidates are queried; no system/application fallback searches occur. If none exists in reference, the copy is skipped. If multiple candidates exist, select one with an exact path override. A missing current header is added from reference after approval; existing headers are compared without overwrite.
-
-`BoardConfigCommon.mk` is resolved only from included View lines under `EXYNOS/.../device/<common_device>/`. The resolver appends the filename to that mapped folder and makes an exact file query. It never searches ESSI system roots, Cinnamon applications, or unrelated common-device folders for BoardConfig. Missing mappings require an explicit path override instead of a broad fallback search.
-
-Paths in the spreadsheet are examples. The resolver reads each supplied template's actual `View` using `p4 client -o`, searches its mapped depot paths for logical checklist targets, and validates each candidate against effective mappings, including exclusions and ordered overrides. It does not construct COOSA/BENI paths by replacing depot names or copying template-name fragments.
-
-For example, a reference `android/device/samsung/m36x_common/Bluetooth/bdroid_buildcfg.h` can map under `//MODEL/PROD_BENI/ONEUI_8_5/...`, while the current template maps the same build path under `//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/...`. Each side is resolved independently. Reference file copies translate through that build path into the current view.
-
-**Current build log (optional)** in tab 2 accepts a local log file; use `"current_log_path": "/path/to/build.log"` in saved/CLI inputs. The tool prints the extracted identifiers in the live log before Perforce discovery: `ro.product.board=s5e8825` supplies the current chipset, `TARGET: m34x` supplies the current model, and `MODEL: erd8825` supplies the current AP directory. Providing the file opts into using its values for current-template paths, including manifest, HCF, bluetooth.mk and the mapped firmware family. Reference discovery keeps its existing inputs/inference. Missing or conflicting fields fall back to existing inputs/inference; an unreadable file logs a warning and falls back. Leave the field blank to keep the existing behavior. Exact depot path overrides still take precedence.
-
-EXYNOS anchors also accept a numeric suffix (`EXYNOS2`, `EXYNOS12`, and so on). This matching happens locally against template View paths; Perforce receives literal paths. HCF and `bluetooth.mk` use the shared `vendor/samsung/hardware/vendor` path, so neither requires a `Cinnamon` depot folder. HCF discovery lists only the selected chipset directory with one `/...` query and filters model-prefixed folders locally (for example, `m34xnsxx` for `m34x`). Ordinary file lookups keep their original exact routes and request timeout; there are no broad fallback searches or additional discovery budgets.
-
-Ambiguous file matches are blocked and listed. Use the **exact depot overrides** JSON field to select a candidate, for example:
-
-```json
-{
-  "current.system.sec_product": "//YOUR_DEPOT/exact/SecProductFeature.common",
-  "reference.system.sec_product": "//REFERENCE_DEPOT/exact/SecProductFeature.common",
-  "current.vendor.manifest": "//YOUR_DEPOT/exact/manifest.xml"
-}
-```
-
-Keys use `current|reference.system|vendor.target`. Targets are `board_config`, `device_common`, `sec_product`, `root_init`, `model_init`, `manifest`, `bluetooth_header`, `bluetooth_folder`, `hcf`, `hcf_makefile`, `firmware`. Directory overrides specify the directory, without a wildcard. File overrides must be inside the relevant template view. The existing writable workspace must map all target files; the tool does not modify its mappings.
-
-`common_device` may be set in JSON when it differs from `<model>_common`. AP and model folder names can also be specified. Unsupported/ambiguous view syntax stops resolution rather than guessing.
-
-## Checklist decisions
-
-- System and vendor rules, SLSI firmware-family mappings, and source-cell references are in `checklist/slsi.json`.
-- BoardConfig rules copy selected settings from the matching reference system/vendor file, preserving values, operators, comments and include paths. Every selected key and the Bluetooth board include is optional: absent reference settings are logged and skipped, and current-only settings are preserved. Duplicate or conditional selected source statements still require manual review. Missing reference WLAN declarations can use an explicitly configured chipset for discovery; no missing declaration is inserted. A supplied chipset that contradicts a present reference WLAN_CHIP must be resolved before copying.
-- Bluetooth product features follow the reference OS, as the SLSI tab instructs. Current-only flags remain for review. Sample `TRUE` values are not imposed on every product. The separate Feature Flags tab has not been supplied as readable text; its feature-specific eligibility still requires review. Add verified feature-specific rules when that source is available.
-- **Check CSC features** is shared between tabs 1 and 6 and is unchecked by default. The saved-input option is `"check_csc_features": false`; set it to `true` to enable the same checks in the CLI. When disabled, planning and empty-file previews omit CSC features and comparison skips `customer_carrier_feature_plain.json` changelist entries without reading their contents. Other changelist files still receive the normal extra-file checks. Changing the checkbox requires a fresh preview/comparison and invalidates apply approval. CSC paths are required only when enabled.
-- CSC discovery searches the entire selected model folder for the exact filename `customer_carrier_feature_plain.json`, regardless of collection, region or subdirectory names. No other filename is read or copied: `customer_carrier_feature.json` is binary and is only listed as a discovered file. Supply model roots such as `//COOSA_CSC/Strawberry/EXYNOS/m36x/` and the matching reference root. Older inputs ending in a region are resolved back to the model directory. Each matching reference file keeps its exact model-relative path in current. Missing files are added; existing JSON objects receive only missing keys and nested sections. Existing values, arrays and current-only keys remain untouched, and a file needing no additions is not reformatted. Missing-file reports apply to complete region subtrees: region metadata (`customer.xml`/`omc.info`) and carrier-file locations identify reporting boundaries. The tool checks all descendants, including `system/`, before marking a region missing. Parent and sibling folders in a matching region are not reported as missing. A genuinely missing region is listed once with every discovered file path and Perforce type beneath it. Current-only plain JSON files are reported. Discovery logs the exact query, returned/matched counts and every matching file path; no `OMC`, `ODM`, `OXM`, `INS` or `system` directory is assumed.
-- Headers/Bluetooth folders are copied only where missing in the current model and present in reference. Existing files are compared and reported; entire current folders are not replaced.
-- Bluetooth HAL verification selects HIDL or AIDL entries actually present in the reference manifest. Checklist names guide selection; checklist versions and entries are not mandatory. Current entries are checked against reference formats, transports, minimum versions, interfaces/instances and fqnames; differences are REVIEW results. HAL XML is not automatically rewritten. HCF checks first resolve reference bluetooth.mk and its selected HCF folder; missing source blocks/files are skipped, missing current files are reported for review, and no default HCF filter is invented.
-- Package names, Make includes, firmware assignments and init commands come only from the corresponding reference file. Checklist examples and patterns select relevant content; they do not fill in absent reference content. Init values and permissions follow the reference, with the explicit JDM option still mapping EFS paths to `/efs`. Vendor init discovery supports both `init.<model>.rc` and literal `init.model.rc` in the model-common directory; if both exist, choose an exact path override.
-- Firmware verification checks that the current template maps an existing firmware path for the chipset family in SLSI!C34 (for example, s5e8825 -> papaya_s620). It does not read or hash firmware binaries or compare them with reference firmware. Missing current paths are REVIEW results. Firmware binaries are not automatically upgraded.
-- CP support is deferred. Legacy CP fields and pasted CP lines are ignored. Phone address/firmware checks remain post-build manual tasks.
-
-## Existing content before additions
-
-Normal planning checks the entire current file before adding an entry. Init commands are compared by command type, target and arguments across all action sections; whitespace, quotes and trailing comments do not create a missing command. If a requested command or its target already exists in another section, the tool leaves the existing commands in place and does not add a duplicate. A REVIEW result and the Live log give the requested event, existing section, line number, command and any argument difference. Execution timing can differ between init events, so this is not reported as a full reference match. Commands already in the selected section can still be updated in place when their arguments differ, unless that would duplicate an exact command elsewhere.
-
-Make assignments and XML feature elements reuse their existing locations. Package lists and includes are searched throughout the file, including continuations; comments are not active entries. Include whitespace/comment differences do not cause another include to be added. An existing include with different required/optional behavior is preserved and reported for review. A package written earlier but subsequently removed by a list reset is not silently added again; the reset is reported for review. Conditional or ambiguous settings continue to require review. Carrier JSON checks use complete nested key paths and preserve existing values; the same key name in a different JSON object is a separate setting. Missing-file copy rules still copy only absent target files.
-
-Tab 4 retains its reference-based empty-file preview. Changelist comparison checks selected edits against that preview and then checks latest depot content before classifying uncovered suggestions as missing. Normal planning also checks the current file before proposing edits.
-
-## Discovery logs
-
-Each plan logs a run identifier, model, current/reference template names and workspace. Each rule logs its start, resolved inputs, search routes, exact queries, returned file counts, matched paths/revisions, rejected mappings, cached reads, planned changes and final reason/status. An unmapped route is explicitly distinguished from a Perforce query returning no live files. Missing-file reports include attempted paths and the template involved; reference absence skips an optional rule, while a missing current counterpart is reported for review. Authentication, permission, timeout, malformed-file and ambiguity errors remain blocked rather than being disguised as absent files. The same diagnostic messages reach the Live log and `runtime.log`.
-
-## Execution behavior and recovery
-
-Before mutation, the executor checks approval, every saved source/target revision and hash, template mappings, workspace mappings, and local state. It rejects files already opened by any workspace, dirty/untracked local targets, path collisions, and files outside the workspace root. It uses exact paths and pinned revisions, never force-syncs, never edits other changelists, and never automatically reverts or shelves.
-
-Only UTF-8 text and binary files are supported for automatic writes. Keyword-expanded, UTF-16, symlink and other specialized Perforce types require manual handling. Conservative make/init parsing blocks ambiguous conditional assignments, duplicate commands and malformed continuations. Arbitrary make expressions are not evaluated.
-
-Perforce operations are not a transaction. If a sync/open/write fails after approval, inspect the recorded pending changelist and execution journal. Completed edits and the original before-content remain available in the saved plan. No automatic rollback is attempted because it could destroy subsequent user edits. Generate a fresh plan after manually resolving partial work; the same execution journal is never overwritten.
-
-## Extend
-
-Edit `checklist/slsi.json` to add or change rules; both GUI and CLI load it. `catalog.py` retains the original readable factory. CLI `--catalog custom.json` selects another catalog. A rule carries an ID, logical target, worksheet source, kind and actions. `transforms.py` contains pure text operations, `resolver.py` template discovery, `planner.py` rule handlers/reporting, `executor.py` approval/preflight, and `perforce.py` the transport. Add tests for meaningful parsing and execution cases before enabling a new rule kind.
-
-The supplied checklist text is preserved in `checklist/source_slsi.tsv` with row positions intact. See `CHECKLIST_COVERAGE.md` for the row-to-rule mapping.
-
-## Validation status
-
-Automated tests exercise a synthetic depot and mocked Perforce protocol, including the supplied COOSA/BENI mapping shape, read-only planning, approval refusal, stale plans, dirty files, regional isolation, JDM paths, idempotency, and partial failure journals. Real server access and device/build validation require your connection and hardware. No live Perforce mutation was performed while implementing this tool.
+The JSON language supports the documented primitives, not arbitrary code or build execution. New files, names, paths and combinations of those primitives belong in JSON. A new file syntax or fundamentally new operation requires a reusable Python primitive and schema support. Ambiguous paths, unsupported Make constructs and unknown applicability produce explicit review/blocking outcomes. Workbook items requiring hardware, unspecified FloatingFeature choices or external patches remain manual, with worksheet references. Automated tests do not establish successful live Perforce deployment, Android builds or device behavior.

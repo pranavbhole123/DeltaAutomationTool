@@ -1,4 +1,5 @@
 """Compare previews with selected edits, checking depot head before declaring gaps."""
+
 from __future__ import annotations
 
 import base64
@@ -15,10 +16,25 @@ from .blank import BlankPlanner, plan_from_previews
 from .config import validate
 from .comparison_report import explain_file, render_comparison
 from .diagnostics import emit
-from .csc import CARRIER_FILENAME, model_root
+from .spec import load_spec, validate_spec
+from .operations import (
+    remove_content,
+    blocks,
+    xml_field,
+    xml_selected,
+    compare_xml,
+    xml_canonical,
+    xml_preview,
+)
 from .executor import supported_type, verify_workspace_path
-from .perforce import MappingError, PerforceError, PerforceTimeout, parse_view, _revision
-from .planner import decode, digest, save_plan
+from .perforce import (
+    MappingError,
+    PerforceError,
+    PerforceTimeout,
+    parse_view,
+    _revision,
+)
+from .planner import decode, digest, save_plan, canonical, verify_seal
 from .resolver import relative_for
 from .transforms import _ASSIGNMENT, _comment, _make_statements, _tokens
 
@@ -26,21 +42,137 @@ DELETES = {"delete", "move/delete"}
 ADDS = {"add", "branch", "move/add"}
 
 
-def _excluded_header(path):
-    return path.rsplit("/", 1)[-1].lower() == "bdroid_buildcfg.h"
+def _excluded(path, plan):
+    for requirement in plan.get("requirements", []):
+        if (
+            requirement["target_path"] == path
+            and requirement.get("comparison", {}).get("include") is False
+        ):
+            return True
+    for item in plan.get("comparison_exclusions", []):
+        if item.get("basename") == path.rsplit("/", 1)[-1] or (
+            item.get("path_regex") and re.search(item["path_regex"], path)
+        ):
+            return True
+    return False
 
 
-def _read_latest(p4, path):
+def _read_latest(p4, path, *, format=None, policy=None):
     """Read one exact target at its current live revision, never a workspace copy."""
     records = p4.files(path)
     if not records:
-        return {"exists": False, "source": path + " (no live depot head)"}, []
+        return {
+            "exists": False,
+            "source": path + " (no live depot head)",
+            "_content": b"",
+        }, []
     if len(records) != 1 or records[0].get("depotFile") != path:
         raise PerforceError(f"Cannot resolve a unique exact depot head for {path}")
     record = records[0]
     revision = _revision(record["rev"])
     content = p4.read_file(path, revision)
-    return {"exists": True, "revision": revision, "source": f"{path}#{revision}"}, content_units(path, content, record["type"])
+    return {
+        "exists": True,
+        "revision": revision,
+        "source": f"{path}#{revision}",
+        "_content": content,
+    }, content_units(path, content, record["type"], format=format, policy=policy)
+
+
+def absence_satisfied(content, requirement):
+    return required_removal(content, requirement) == (content or b"")
+
+
+def required_removal(content, requirement):
+    text, encoding = decode(content or b"")
+    step = requirement["step"]
+    if step["op"] == "block.remove":
+        for block in reversed(blocks(text, step["block"])):
+            text = text[: block["start"]] + text[block["end"] :]
+    else:
+        text = remove_content(
+            text, requirement.get("selector", {}), make=step["op"] == "make.remove"
+        )
+    return text.encode(encoding)
+
+
+def satisfied_requirement_units(path, requirements, latest, policy):
+    """Selected XML constraints / JSON missing-key semantics, without writes."""
+    satisfied = {}
+    if policy.get("mode") != "requirements" or not latest["exists"]:
+        return satisfied
+    actual = decode(latest["_content"])[0]
+    for requirement in requirements:
+        step = requirement.get("step", {})
+        op = step.get("op")
+        preview = requirement.get("preview")
+        if preview is None:
+            continue
+        if op == "xml.ensure":
+            wanted_root = ET.fromstring(preview)
+            current_root = ET.fromstring(actual)
+            select = step.get("from", {}).get("select", step.get("select", {}))
+            selected = xml_selected(wanted_root, select)
+            targets = xml_selected(
+                current_root,
+                (
+                    dict(select, names=[], patterns=[".*"])
+                    if select.get("name_path")
+                    else select
+                ),
+            )
+            key = lambda node: tuple(
+                tuple(xml_field(node, p)) for p in step["identity"]
+            )
+            for node in selected:
+                found = [n for n in targets if key(n) == key(node)]
+                if len(found) > 1:
+                    raise ValueError("Ambiguous latest XML identity: " + str(key(node)))
+                if not found:
+                    continue
+                differences = (
+                    compare_xml(node, found[0], step.get("fields", []))
+                    if step.get("fields")
+                    else xml_canonical(node) != xml_canonical(found[0])
+                )
+                if (
+                    differences
+                    and step.get("policy", {}).get("on_value_difference") != "preserve"
+                ):
+                    continue
+                for unit in content_units(
+                    path,
+                    xml_preview(wanted_root, [node]).encode(),
+                    format="xml",
+                    policy=policy,
+                ):
+                    satisfied[_signature(unit)] = (
+                        "Latest XML satisfies the rule’s identity and field constraints (including declared minimum versions and preservation policy)."
+                    )
+        elif op == "json.merge_missing":
+            wanted = json.loads(preview, object_pairs_hook=_unique_json)
+            current = json.loads(actual, object_pairs_hook=_unique_json)
+            if not isinstance(current, dict):
+                raise ValueError("Latest JSON merge target must be an object")
+            for unit in content_units(
+                path, preview.encode(), format="json", policy=policy
+            ):
+                reference, target = wanted, current
+                exists = True
+                trail = unit["identity"][5:]
+                for part in trail.split("/")[1:]:
+                    if not isinstance(reference, dict) or not isinstance(target, dict):
+                        break  # Existing scalar/array values are intentionally preserved.
+                    key = part.replace("~1", "/").replace("~0", "~")
+                    if key not in target:
+                        exists = False
+                        break
+                    reference, target = reference[key], target[key]
+                if exists:
+                    satisfied[_signature(unit)] = (
+                        "The required JSON key is present; json.merge_missing preserves its existing value."
+                    )
+    return satisfied
 
 
 def parse_changelists(values):
@@ -63,35 +195,62 @@ def _unique_json(pairs):
     return value
 
 
-def content_units(path, content, file_type="text"):
+def content_units(path, content, file_type="text", *, format=None, policy=None):
     """Comparable statements/packages/values. Unchanged units are subtracted."""
     if content is None:
         return []
+    policy = policy or {}
+    if format is None:
+        format = {
+            ".json": "json",
+            ".xml": "xml",
+            ".rc": "init",
+            ".mk": "make",
+            ".common": "make",
+        }.get(Path(path).suffix.lower(), "text")
     units = []
+
     def add(identity, value, text, line=None):
         units.append({"identity": identity, "value": value, "text": text, "line": line})
-    if not file_type.startswith("text"):
-        add("binary", digest(content), f"Binary {len(content)} bytes; SHA-256 {digest(content)}")
+
+    if format == "binary" or not file_type.startswith("text"):
+        add(
+            "binary",
+            digest(content),
+            f"Binary {len(content)} bytes; SHA-256 {digest(content)}",
+        )
         return units
     text, _ = decode(content.replace(b"\r\n", b"\n"))
-    if path.lower().endswith(".json"):
+    if format == "json":
+
         def visit(value, trail):
             if isinstance(value, dict) and value:
                 for key, child in value.items():
-                    visit(child, trail + "/" + key.replace("~", "~0").replace("/", "~1"))
+                    visit(
+                        child, trail + "/" + key.replace("~", "~0").replace("/", "~1")
+                    )
             elif isinstance(value, list) and value:
                 for index, child in enumerate(value):
                     visit(child, trail + f"/{index}")
             else:
                 rendered = json.dumps(value, sort_keys=True, ensure_ascii=False)
                 add("json:" + trail, rendered, f"{trail} = {rendered}")
+
         if text.strip():
             visit(json.loads(text, object_pairs_hook=_unique_json), "")
-    elif path.lower().endswith(".xml"):
+    elif format == "xml":
+
         def visit(element, trail):
             name = element.tag
-            if name == "hal":
-                name += "[" + (element.findtext("name") or "") + "]"
+            if name in policy.get("xml_identity", {}):
+                name += (
+                    "["
+                    + "|".join(
+                        ",".join(str(v) for v in xml_field(element, field))
+                        for field in policy["xml_identity"][name]
+                    )
+                    + "]"
+                )
             here = trail + "/" + name
             for key, value in element.attrib.items():
                 add("xml:" + here + "/@" + key, value, f"{here}/@{key} = {value}")
@@ -100,12 +259,13 @@ def content_units(path, content, file_type="text"):
                 add("xml:" + here, value, f"{here} = {value}")
             for child in element:
                 visit(child, here)
+
         if text.strip():
             visit(ET.fromstring(text), "")
             for match in re.finditer(r"<!--(.*?)-->", text, re.S):
                 comment = match[1].strip()
                 add("xml-comment:" + comment, comment, "<!--" + comment + "-->")
-    elif path.lower().endswith(".rc"):
+    elif format == "init":
         scope = ""
         for index, raw in enumerate(text.splitlines(), 1):
             line = raw.strip()
@@ -113,8 +273,13 @@ def content_units(path, content, file_type="text"):
                 scope = " ".join(line.split())
             elif line:
                 canonical = " ".join(line.split())
-                add("init:" + scope + ":" + canonical, canonical, (scope + " → " if scope else "") + line, index)
-    elif path.lower().endswith((".mk", ".common")) or "SecProductFeature" in path:
+                add(
+                    "init:" + scope + ":" + canonical,
+                    canonical,
+                    (scope + " → " if scope else "") + line,
+                    index,
+                )
+    elif format == "make":
         conditions = []
         for start, end, logical, depth in _make_statements(text):
             line = " ".join(logical.split())
@@ -131,19 +296,38 @@ def content_units(path, content, file_type="text"):
                 continue
             scope = " / ".join(conditions)
             assignment = _ASSIGNMENT.match(line)
-            if assignment and assignment["key"] == "PRODUCT_PACKAGES":
+            if assignment and assignment["key"] in policy.get("list_variables", []):
                 for package in assignment["value"].split():
-                    add("package:" + scope + ":" + package, package, "PRODUCT_PACKAGES: " + package, start + 1)
+                    add(
+                        "list:" + assignment["key"] + ":" + scope + ":" + package,
+                        package,
+                        assignment["key"] + ": " + package,
+                        start + 1,
+                    )
             elif assignment:
                 value = assignment["operator"] + " " + assignment["value"].strip()
-                add("make:" + scope + ":" + assignment["key"], value,
-                    (scope + " → " if scope else "") + assignment["key"] + " " + value, start + 1)
+                add(
+                    "make:" + scope + ":" + assignment["key"],
+                    value,
+                    (scope + " → " if scope else "") + assignment["key"] + " " + value,
+                    start + 1,
+                )
             elif line:
-                add("make-line:" + scope + ":" + line, line, (scope + " → " if scope else "") + line, start + 1)
+                add(
+                    "make-line:" + scope + ":" + line,
+                    line,
+                    (scope + " → " if scope else "") + line,
+                    start + 1,
+                )
         for index, raw in enumerate(text.splitlines(), 1):
             _, comment = _comment(raw)
             if comment:
-                add("comment:" + comment.strip(), comment.strip(), comment.strip(), index)
+                add(
+                    "comment:" + comment.strip(),
+                    comment.strip(),
+                    comment.strip(),
+                    index,
+                )
     else:
         for index, raw in enumerate(text.splitlines(), 1):
             if raw.strip():
@@ -176,12 +360,28 @@ def _difference(left, right):
 
 def _diff(path, before, after, file_type):
     if not file_type.startswith("text"):
-        return "\n".join(f"{label}: " + ("absent" if value is None else f"{len(value)} bytes; SHA-256 {digest(value)}")
-                         for label, value in (("before", before), ("after", after))) + "\n"
+        return (
+            "\n".join(
+                f"{label}: "
+                + (
+                    "absent"
+                    if value is None
+                    else f"{len(value)} bytes; SHA-256 {digest(value)}"
+                )
+                for label, value in (("before", before), ("after", after))
+            )
+            + "\n"
+        )
     old, _ = decode((before or b"").replace(b"\r\n", b"\n"))
     new, _ = decode((after or b"").replace(b"\r\n", b"\n"))
-    return "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True),
-                                      fromfile=path + " (CL before)", tofile=path + " (CL after)"))
+    return "".join(
+        difflib.unified_diff(
+            old.splitlines(True),
+            new.splitlines(True),
+            fromfile=path + " (CL before)",
+            tofile=path + " (CL after)",
+        )
+    )
 
 
 def _load_developer(p4, number, source):
@@ -193,17 +393,21 @@ def _load_developer(p4, number, source):
             shelf = p4.describe_change(number, shelved=True)
             source = "shelved" if shelf["files"] else "workspace"
     if (source == "submitted") != (change["status"] == "submitted"):
-        raise ValueError(f"CL {number} status does not match the selected content source")
+        raise ValueError(
+            f"CL {number} status does not match the selected content source"
+        )
     if source == "shelved":
         change = p4.describe_change(number, shelved=True)
         if not change["files"]:
             raise ValueError(f"CL {number} has no shelved files")
     if source == "workspace" and change["client"] != p4.client:
-        raise ValueError(f"CL {number}: unshelved files require the configured developer local workspace; shelve remote work first")
+        raise ValueError(
+            f"CL {number}: unshelved files require the configured developer local workspace; shelve remote work first"
+        )
     return {**change, "content_source": source}
 
 
-def _read_delta(p4, change, entry):
+def _read_delta(p4, change, entry, *, format=None, policy=None):
     path, action, source = entry["path"], entry["action"], change["content_source"]
     number = change["number"]
     local = None
@@ -215,7 +419,9 @@ def _read_delta(p4, change, entry):
         supported_type(file_type)
         revision = int(state.get("haveRev", 0))
         if action not in ADDS and revision <= 0:
-            raise PerforceError(f"Cannot identify the local file's have revision: {path}")
+            raise PerforceError(
+                f"Cannot identify the local file's have revision: {path}"
+            )
         before = p4.read_file(path, revision) if action not in ADDS else None
         local = verify_workspace_path(p4.where(path), p4.workspace_spec())
         after = None if action in DELETES else local.read_bytes()
@@ -224,7 +430,11 @@ def _read_delta(p4, change, entry):
     elif source == "submitted":
         revision = entry["revision"]
         file_type = entry["type"] or "text"
-        before = p4.read_file(path, revision - 1) if action not in ADDS and revision > 1 else None
+        before = (
+            p4.read_file(path, revision - 1)
+            if action not in ADDS and revision > 1
+            else None
+        )
         after = None if action in DELETES else p4.read_file(path, revision)
         before_source = f"{path}#{revision - 1}"
         after_source = f"{path}#{revision} (submitted CL {number})"
@@ -234,7 +444,9 @@ def _read_delta(p4, change, entry):
             raise PerforceError(f"Ambiguous depot head for shelved file: {path}")
         record = records[0] if records else {}
         file_type = entry["type"] or record.get("type", "text")
-        before = p4.read_file(path, record["rev"]) if record and action not in ADDS else None
+        before = (
+            p4.read_file(path, record["rev"]) if record and action not in ADDS else None
+        )
         after = None if action in DELETES else p4.read_shelved_file(path, number)
         before_source = f"{path}#{record.get('rev', '?')} (depot head at comparison)"
         after_source = f"{path} (shelf CL {number})"
@@ -245,11 +457,15 @@ def _read_delta(p4, change, entry):
     additions, removals, unchanged = [], [], []
     error = ""
     try:
-        old, new = content_units(path, before, file_type), content_units(path, after, file_type)
+        old, new = content_units(
+            path, before, file_type, format=format, policy=policy
+        ), content_units(path, after, file_type, format=format, policy=policy)
         additions, removals = _difference(new, old), _difference(old, new)
         unchanged = _difference(new, additions)
     except Exception as exc:
-        error = "File content was read, but statement/value extraction failed: " + str(exc)
+        error = "File content was read, but statement/value extraction failed: " + str(
+            exc
+        )
     try:
         raw_diff = _diff(path, before, after, file_type)
     except UnicodeError as exc:
@@ -258,26 +474,46 @@ def _read_delta(p4, change, entry):
     for operation, units in (("add", additions), ("remove", removals)):
         for unit in units:
             unit.update(operation=operation, changelists=[number])
-    return {**entry, "changelist": number, "content_source": source,
-            "additions": additions, "removals": removals, "_unchanged": unchanged, "diff": raw_diff,
-            "before_source": before_source, "after_source": after_source,
-            "before_sha256": digest(before) if before is not None else None,
-            "before_bytes": len(before) if before is not None else None,
-            "after_bytes": len(after) if after is not None else None,
-            "comparison_type": file_type,
-            "after_sha256": digest(after) if after is not None else None,
-            "exists_after": after is not None, "local": local, "error": error}
+    return {
+        **entry,
+        "changelist": number,
+        "content_source": source,
+        "additions": additions,
+        "removals": removals,
+        "_unchanged": unchanged,
+        "diff": raw_diff,
+        "before_source": before_source,
+        "after_source": after_source,
+        "before_sha256": digest(before) if before is not None else None,
+        "before_bytes": len(before) if before is not None else None,
+        "after_bytes": len(after) if after is not None else None,
+        "comparison_type": file_type,
+        "after_sha256": digest(after) if after is not None else None,
+        "exists_after": after is not None,
+        "local": local,
+        "error": error,
+        "_after": after,
+        "_before": before,
+    }
 
 
 def _combine(deltas, history=None):
     """Combine selected edits, cancelling additions later removed by another CL."""
     additions, removals = [], []
     for delta in deltas:
-        for incoming, target, opposite in ((delta["removals"], removals, additions),
-                                           (delta["additions"], additions, removals)):
+        for incoming, target, opposite in (
+            (delta["removals"], removals, additions),
+            (delta["additions"], additions, removals),
+        ):
             for unit in incoming:
-                matched = next((index for index, other in enumerate(opposite)
-                                if _signature(other) == _signature(unit)), None)
+                matched = next(
+                    (
+                        index
+                        for index, other in enumerate(opposite)
+                        if _signature(other) == _signature(unit)
+                    ),
+                    None,
+                )
                 if matched is not None:
                     earlier = opposite.pop(matched)
                     if history is not None:
@@ -287,184 +523,487 @@ def _combine(deltas, history=None):
     return additions, removals
 
 
-def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, preview_plan=None):
+def compare_changelist(
+    p4, config, numbers, *, source="auto", catalog=None, preview_plan=None
+):
+    catalog = (
+        validate_spec(catalog) if catalog is not None else load_spec(config=config)
+    )
+    config = validate(config, catalog)
     numbers = parse_changelists(numbers)
     run_id = uuid.uuid4().hex[:8]
+
     def log(message):
         emit(p4, f"[comparison {run_id}] {message}")
-    log(f"START: CLs={', '.join(numbers)}; requested source={source}; model={config.get('model', 'infer from templates')}.")
+
+    log(
+        f"START: CLs={', '.join(numbers)}; requested source={source}; model={config.get('model', 'infer from templates')}."
+    )
     if source not in ("auto", "submitted", "shelved", "workspace"):
         raise ValueError("Unsupported changelist content source")
+    if preview_plan is not None:
+        verify_seal(preview_plan)
+        if preview_plan.get("catalog_sha256") != digest(canonical(catalog)):
+            raise ValueError(
+                "Rules file changed since the preview; regenerate it before comparison."
+            )
+        expected = preview_plan.get("input_config", preview_plan["config"])
+        if config != expected:
+            raise ValueError(
+                "Tab 4 preview inputs differ from current inputs; regenerate the preview before comparing."
+            )
+        source_plan = preview_plan
+        log(
+            f"Using supplied tab 4 previews: {len(source_plan['previews'])} entries; plan digest={source_plan['digest']}."
+        )
+    else:
+        log("Generating reference-led empty-file previews for the comparison baseline.")
+        source_plan = BlankPlanner(p4, config, catalog).build()
     changes = []
     for number in numbers:
         change = _load_developer(p4, number, source)
         changes.append(change)
-        log(f"CL {number}: status={change['status']}; resolved content source={change['content_source']}; "
-            f"developer={change['user']}@{change['client']}; {len(change['files'])} file(s).")
-    if preview_plan is not None:
-        supplied = validate(config)
-        for key, value in supplied.items():
-            expected = preview_plan["config"].get(key)
-            if key == "current" and isinstance(expected, dict):
-                expected = {k: v for k, v in expected.items() if k != "build_log_inputs"}
-            if value not in (None, "", []) and value != expected:
-                raise ValueError("Tab 4 preview inputs differ from current inputs; regenerate the preview before comparing.")
-        source_plan = preview_plan
-        log(f"Using supplied tab 4 previews: {len(source_plan['previews'])} entries; plan digest={source_plan['digest']}.")
-    else:
-        log("Generating reference-led empty-file previews for the comparison baseline.")
-        source_plan = BlankPlanner(p4, config, catalog).build()
+        log(
+            f"CL {number}: status={change['status']}; resolved content source={change['content_source']}; "
+            f"developer={change['user']}@{change['client']}; {len(change['files'])} file(s)."
+        )
     plan = plan_from_previews(source_plan)
-    planned = {entry["path"]: entry for entry in plan["changes"] if not _excluded_header(entry["path"])}
+    planned = {
+        entry["path"]: entry
+        for entry in plan["changes"]
+        if not _excluded(entry["path"], plan)
+    }
     previews_by_path = {}
-    snapshots = {entry['path']: entry for entry in plan.get('snapshots', [])}
-    for preview in plan['previews']:
-        previews_by_path.setdefault(preview['target_path'], []).append(preview)
-    log(f"Baseline ready: {len(planned)} target file(s); {len(plan['previews'])} preview entries.")
+    snapshots = {entry["path"]: entry for entry in plan.get("snapshots", [])}
+    for preview in plan["previews"]:
+        previews_by_path.setdefault(preview["target_path"], []).append(preview)
+    log(
+        f"Baseline ready: {len(planned)} target file(s); {len(plan['previews'])} preview entries."
+    )
+    metadata = {
+        r["target_path"]: {"format": r["format"], "policy": r.get("comparison", {})}
+        for r in plan.get("requirements", [])
+    }
     developer, pending_reads = {}, []
-    warnings = ["bdroid_buildcfg.h is excluded from changelist comparison; its normal copy-if-absent rule and tab 4 preview are unchanged."]
-    if not plan["config"]["check_csc_features"]:
-        warnings.append("CSC feature checks are disabled; " + CARRIER_FILENAME + " changelist entries are excluded.")
+    warnings = [
+        item.get("reason", "Rule-file exclusion: " + str(item))
+        for item in plan.get("comparison_exclusions", [])
+    ]
     if not plan["previews"]:
-        warnings.append("Tab 4 has no preview entries. The comparison baseline is unavailable; inspect tab 4 or the saved blank-plan report for rule results.")
+        warnings.append(
+            "Tab 4 has no preview entries. The comparison baseline is unavailable; inspect tab 4 or the saved blank-plan report for rule results."
+        )
     for order, change in enumerate(changes):
         if change["content_source"] == "shelved":
-            warnings.append(f"CL {change['number']}: shelved edits are extracted against depot head; only shelved files are included.")
+            warnings.append(
+                f"CL {change['number']}: shelved edits are extracted against depot head; only shelved files are included."
+            )
         for entry in change["files"]:
-            if _excluded_header(entry["path"]):
-                log(f"CL {change['number']}: header excluded from comparison: {entry['path']}")
-                continue
-            if not plan["config"]["check_csc_features"] and entry["path"].rsplit("/", 1)[-1] == CARRIER_FILENAME:
-                warnings.append(f"CL {change['number']}: CSC feature file skipped: {entry['path']}")
+            if _excluded(entry["path"], plan):
+                warnings.append(
+                    f"CL {change['number']}: excluded by rule-file comparison policy: {entry['path']}"
+                )
                 log(warnings[-1])
                 continue
             try:
-                log(f"Reading CL {change['number']} file: {entry['path']}; action={entry['action']}; type={entry['type']}.")
-                delta = _read_delta(p4, change, entry)
+                log(
+                    f"Reading CL {change['number']} file: {entry['path']}; action={entry['action']}; type={entry['type']}."
+                )
+                delta = _read_delta(
+                    p4, change, entry, **metadata.get(entry["path"], {})
+                )
                 if change["content_source"] != "submitted" and delta["exists_after"]:
-                    pending_reads.append((delta["local"], entry["path"], change["number"], delta["after_sha256"]))
+                    pending_reads.append(
+                        (
+                            delta["local"],
+                            entry["path"],
+                            change["number"],
+                            delta["after_sha256"],
+                        )
+                    )
                 delta.pop("local")
-                log(f"CL {change['number']} comparison sources: BEFORE {delta['before_source']}; AFTER {delta['after_source']}.")
-                log(f"CL {change['number']} extracted edits: {len(delta['additions'])} additions/new values; {len(delta['removals'])} removals/old values; error={delta['error'] or 'none'}.")
-                for operation in ('additions', 'removals'):
+                log(
+                    f"CL {change['number']} comparison sources: BEFORE {delta['before_source']}; AFTER {delta['after_source']}."
+                )
+                log(
+                    f"CL {change['number']} extracted edits: {len(delta['additions'])} additions/new values; {len(delta['removals'])} removals/old values; error={delta['error'] or 'none'}."
+                )
+                for operation in ("additions", "removals"):
                     for unit in delta[operation]:
-                        log(f"CL {change['number']} {operation.upper()} {entry['path']} line {unit.get('line') or 'n/a'}: {unit['text']}")
+                        log(
+                            f"CL {change['number']} {operation.upper()} {entry['path']} line {unit.get('line') or 'n/a'}: {unit['text']}"
+                        )
             except PerforceTimeout:
                 raise
             except Exception as exc:
-                delta = {**entry, "changelist": change["number"], "content_source": change["content_source"],
-                         "additions": [], "removals": [], "diff": "", "error": str(exc)}
+                delta = {
+                    **entry,
+                    "changelist": change["number"],
+                    "content_source": change["content_source"],
+                    "additions": [],
+                    "removals": [],
+                    "diff": "",
+                    "error": str(exc),
+                }
                 log(f"ERROR reading CL {change['number']} {entry['path']}: {exc}")
             delta["input_order"] = order
             developer.setdefault(entry["path"], []).append(delta)
     views, mapping_errors = {}, []
     for key, spec in plan["templates"].items():
-        if key.startswith("current."):
+        if plan.get("source_roles", {}).get(key) == "current":
             try:
                 views[key] = parse_view(spec)
             except MappingError as exc:
                 mapping_errors.append(f"{key}: {exc}")
     results = []
-    try:
-        csc_path = plan["config"]["current"].get("csc_path", "")
-        csc_root = model_root(csc_path, plan["config"]["model"]) + "/" if plan["config"]["check_csc_features"] and csc_path else None
-    except ValueError as exc:
-        csc_root = None
-        mapping_errors.append(str(exc))
     for path in sorted(planned.keys() | developer.keys()):
         wanted = planned.get(path)
-        deltas = sorted(developer.get(path, []), key=lambda delta: (
-            delta["content_source"] != "submitted", delta["revision"] if delta["content_source"] == "submitted" else delta["input_order"]))
-        item = {"path": path, "filename": path.rsplit("/", 1)[-1], "planned": wanted is not None,
-                "in_changelists": bool(deltas), "changelists": list(dict.fromkeys(delta["changelist"] for delta in deltas)),
-                "rules": wanted["rules"] if wanted else [], "template_paths": [],
-                "missing": [], "extra": [], "matched": [], "already_present": [],
-                "latest": None, "latest_suggestions": [], "developer_changes": deltas, "errors": [],
-                "suggested": [], "preview_sources": previews_by_path.get(path, []),
-                "combined_additions": [], "developer_removals": [], "cancelled_edits": [], "findings": []}
-        log(f"FILE START {path}: in preview={wanted is not None}; CL order=" + (', '.join(delta['changelist'] for delta in deltas) or 'file absent from selected CLs'))
+        deltas = sorted(
+            developer.get(path, []),
+            key=lambda delta: (
+                delta["content_source"] != "submitted",
+                (
+                    delta["revision"]
+                    if delta["content_source"] == "submitted"
+                    else delta["input_order"]
+                ),
+            ),
+        )
+        item = {
+            "path": path,
+            "filename": path.rsplit("/", 1)[-1],
+            "planned": wanted is not None,
+            "in_changelists": bool(deltas),
+            "changelists": list(dict.fromkeys(delta["changelist"] for delta in deltas)),
+            "rules": wanted["rules"] if wanted else [],
+            "template_paths": [],
+            "missing": [],
+            "extra": [],
+            "matched": [],
+            "already_present": [],
+            "latest": None,
+            "latest_suggestions": [],
+            "developer_changes": deltas,
+            "errors": [],
+            "suggested": [],
+            "preview_sources": previews_by_path.get(path, []),
+            "combined_additions": [],
+            "developer_removals": [],
+            "cancelled_edits": [],
+            "findings": [],
+        }
+        log(
+            f"FILE START {path}: in preview={wanted is not None}; CL order="
+            + (
+                ", ".join(delta["changelist"] for delta in deltas)
+                or "file absent from selected CLs"
+            )
+        )
         for key, view in views.items():
             try:
                 item["template_paths"].append(f"{key}: {relative_for(view, path)}")
             except MappingError:
                 pass
-        if csc_root and path.startswith(csc_root):
-            item["template_paths"].append("current.csc: " + path[len(csc_root):])
+        for key, root in plan.get("source_roots", {}).items():
+            if plan.get("source_roles", {}).get(key) == "current" and path.startswith(
+                root + "/"
+            ):
+                item["template_paths"].append(key + ": " + path[len(root) + 1 :])
         item["outside_templates"] = not item["template_paths"]
         item["extra_file"] = bool(deltas and not wanted)
-        item["errors"] = [f"CL {delta['changelist']}: {delta['error']}" for delta in deltas if delta["error"]]
+        item["errors"] = [
+            f"CL {delta['changelist']}: {delta['error']}"
+            for delta in deltas
+            if delta["error"]
+        ]
         if not plan["previews"]:
             item["extra_file"] = False
-            item["errors"].append("No tab-4 preview baseline is available; this file cannot be classified.")
+            item["errors"].append(
+                "No tab-4 preview baseline is available; this file cannot be classified."
+            )
         try:
             expected, seen = [], {}
+            absent_requirements = [
+                r
+                for r in plan.get("requirements", [])
+                if r["target_path"] == path and r.get("desired") == "absent"
+            ]
             for snippet in wanted["preview_contents"] if wanted else []:
-                preview = next((entry for entry in item['preview_sources'] if entry['rule'] == snippet['rule']), {})
-                for unit in content_units(path, base64.b64decode(snippet["content"]), snippet["type"]):
+                if snippet.get("desired") == "absent":
+                    continue
+                preview = next(
+                    (
+                        entry
+                        for entry in item["preview_sources"]
+                        if entry["rule"] == snippet["rule"]
+                    ),
+                    {},
+                )
+                for unit in content_units(
+                    path,
+                    base64.b64decode(snippet["content"]),
+                    snippet["type"],
+                    format=snippet.get("format"),
+                    policy=snippet.get("comparison"),
+                ):
                     signature = _signature(unit)
-                    provenance = {"rule": snippet['rule'], "title": preview.get('title', ''),
-                                  "worksheet": preview.get('source', ''), "reference_path": preview.get('reference_path'),
-                                  "reference_revision": snapshots.get(preview.get('reference_path'), {}).get('revision'),
-                                  "preview_line": unit.get('line')}
+                    provenance = {
+                        "rule": snippet["rule"],
+                        "title": preview.get("title", ""),
+                        "worksheet": preview.get("source", ""),
+                        "reference_path": preview.get("reference_path"),
+                        "reference_revision": snapshots.get(
+                            preview.get("reference_path"), {}
+                        ).get("revision"),
+                        "preview_line": unit.get("line"),
+                    }
                     if signature not in seen:
-                        unit['sources'] = []
+                        unit["sources"] = []
                         expected.append(unit)
                         seen[signature] = unit
-                    if provenance not in seen[signature]['sources']:
-                        seen[signature]['sources'].append(provenance)
-            item['suggested'] = expected
+                    if provenance not in seen[signature]["sources"]:
+                        seen[signature]["sources"].append(provenance)
+            item["suggested"] = expected
             for unit in expected:
-                log(f"TOOL SUGGESTS {path}: {unit['text']}; rules=" + ', '.join(origin['rule'] for origin in unit['sources']))
-            additions, removals = _combine([delta for delta in deltas if not delta["error"]], item['cancelled_edits'])
-            item['combined_additions'] = additions
+                log(
+                    f"TOOL SUGGESTS {path}: {unit['text']}; rules="
+                    + ", ".join(origin["rule"] for origin in unit["sources"])
+                )
+            additions, removals = _combine(
+                [delta for delta in deltas if not delta["error"]],
+                item["cancelled_edits"],
+            )
+            item["combined_additions"] = additions
             signatures = {_signature(unit) for unit in expected}
             for delta in deltas:
-                delta['unchanged_suggestions'] = [unit for unit in delta.pop('_unchanged', []) if _signature(unit) in signatures]
+                delta["unchanged_suggestions"] = [
+                    unit
+                    for unit in delta.pop("_unchanged", [])
+                    if _signature(unit) in signatures
+                ]
             uncovered = _difference(expected, additions)
             item["extra"] = _difference(additions, expected)
             remaining = list(additions)
             for unit in expected:
-                index = next((index for index, other in enumerate(remaining) if _signature(other) == _signature(unit)), None)
+                index = next(
+                    (
+                        index
+                        for index, other in enumerate(remaining)
+                        if _signature(other) == _signature(unit)
+                    ),
+                    None,
+                )
                 if index is not None:
                     matched = dict(remaining.pop(index))
-                    matched['sources'] = unit['sources']
+                    matched["sources"] = unit["sources"]
                     item["matched"].append(matched)
             expected_ids = {unit["identity"] for unit in expected}
             added_ids = {unit["identity"] for unit in additions}
-            item["extra"].extend(unit for unit in removals if unit["identity"] not in expected_ids or unit["identity"] not in added_ids)
+            item["extra"].extend(
+                unit
+                for unit in removals
+                if unit["identity"] not in expected_ids
+                or unit["identity"] not in added_ids
+            )
             item["developer_removals"] = removals
-            empty_file_uncovered = wanted and not expected and (not deltas or not deltas[-1].get("exists_after"))
-            if (uncovered or empty_file_uncovered) and not item["errors"]:
+            empty_file_uncovered = (
+                wanted
+                and not expected
+                and not absent_requirements
+                and (not deltas or not deltas[-1].get("exists_after"))
+            )
+            if (uncovered or empty_file_uncovered or absent_requirements) and not item[
+                "errors"
+            ]:
                 try:
-                    log(f"Checking latest depot content for uncovered suggestions: {path}")
-                    item["latest"], latest_units = _read_latest(p4, path)
+                    log(
+                        f"Checking latest depot content for uncovered suggestions: {path}"
+                    )
+                    item["latest"], latest_units = _read_latest(
+                        p4, path, **metadata.get(path, {})
+                    )
                     log(f"Latest comparison source: {item['latest']['source']}")
                     uncovered_ids = {unit["identity"] for unit in uncovered}
-                    item["latest_suggestions"] = [dict(unit, operation="present", depot_source=item["latest"]["source"])
-                                                  for unit in latest_units if unit["identity"] in uncovered_ids]
+                    item["latest_suggestions"] = [
+                        dict(
+                            unit,
+                            operation="present",
+                            depot_source=item["latest"]["source"],
+                        )
+                        for unit in latest_units
+                        if unit["identity"] in uncovered_ids
+                    ]
                     remaining_latest = list(latest_units)
+                    semantic = satisfied_requirement_units(
+                        path,
+                        [
+                            r
+                            for r in plan.get("requirements", [])
+                            if r["target_path"] == path
+                        ],
+                        item["latest"],
+                        metadata.get(path, {}).get("policy", {}),
+                    )
                     for unit in uncovered:
-                        index = next((i for i, other in enumerate(remaining_latest) if _signature(other) == _signature(unit)), None)
-                        if index is None and _init_command(unit):
-                            index = next((i for i, other in enumerate(remaining_latest)
-                                          if _init_command(other) == _init_command(unit)), None)
+                        index = next(
+                            (
+                                i
+                                for i, other in enumerate(remaining_latest)
+                                if _signature(other) == _signature(unit)
+                            ),
+                            None,
+                        )
+                        if (
+                            index is None
+                            and metadata.get(path, {})
+                            .get("policy", {})
+                            .get("latest_scope")
+                            == "file"
+                            and _init_command(unit)
+                        ):
+                            index = next(
+                                (
+                                    i
+                                    for i, other in enumerate(remaining_latest)
+                                    if _init_command(other) == _init_command(unit)
+                                ),
+                                None,
+                            )
                         if index is not None:
-                            actual = remaining_latest[index] if _init_command(unit) else remaining_latest.pop(index)
-                            present = dict(actual, operation="present", depot_source=item["latest"]["source"], suggested=unit)
+                            actual = (
+                                remaining_latest[index]
+                                if _init_command(unit)
+                                else remaining_latest.pop(index)
+                            )
+                            present = dict(
+                                actual,
+                                operation="present",
+                                depot_source=item["latest"]["source"],
+                                suggested=unit,
+                            )
                             present["sources"] = unit["sources"]
                             item["already_present"].append(present)
+                        elif _signature(unit) in semantic:
+                            actual = next(
+                                (
+                                    u
+                                    for u in latest_units
+                                    if u["identity"] == unit["identity"]
+                                ),
+                                unit,
+                            )
+                            item["already_present"].append(
+                                dict(
+                                    actual,
+                                    operation="present",
+                                    depot_source=item["latest"]["source"],
+                                    suggested=unit,
+                                    sources=unit["sources"],
+                                    semantic_match=semantic[_signature(unit)],
+                                )
+                            )
                         else:
                             item["missing"].append(unit)
                     if empty_file_uncovered:
-                        unit = {"text": "Preview includes an empty file.", "depot_source": item["latest"]["source"]}
-                        item["already_present" if item["latest"]["exists"] else "missing"].append(unit)
+                        unit = {
+                            "text": "Preview includes an empty file.",
+                            "depot_source": item["latest"]["source"],
+                        }
+                        item[
+                            "already_present" if item["latest"]["exists"] else "missing"
+                        ].append(unit)
                 except PerforceTimeout:
                     raise
                 except Exception as exc:
-                    item["errors"].append("Latest depot content could not be checked: " + str(exc))
+                    item["errors"].append(
+                        "Latest depot content could not be checked: " + str(exc)
+                    )
+            for index, requirement in enumerate(absent_requirements):
+                unit = {
+                    "identity": "absence:" + str(index),
+                    "value": "absent",
+                    "desired": "absent",
+                    "text": "Must be absent: "
+                    + json.dumps(
+                        requirement.get("selector") or requirement["step"].get("block"),
+                        sort_keys=True,
+                    ),
+                    "sources": [
+                        {
+                            "rule": requirement["rule"],
+                            "worksheet": requirement["source"],
+                            "reference_path": None,
+                            "preview_line": None,
+                        }
+                    ],
+                }
+                item["suggested"].append(unit)
+                if item["errors"]:
+                    continue
+                # Attribution requires an actual selected removal and absence in its
+                # resulting file, not just a file that was already clean before it.
+                matches = [
+                    d
+                    for d in deltas
+                    if not d["error"]
+                    and not absence_satisfied(d.get("_before"), requirement)
+                    and absence_satisfied(d.get("_after"), requirement)
+                ]
+                if (
+                    matches
+                    and deltas
+                    and absence_satisfied(deltas[-1].get("_after"), requirement)
+                ):
+                    item["matched"].append(
+                        dict(
+                            unit,
+                            operation="remove",
+                            changelists=[d["changelist"] for d in matches],
+                        )
+                    )
+                    covered = set()
+                    for delta in matches:
+                        before = content_units(
+                            path,
+                            delta["_before"],
+                            format=requirement["format"],
+                            policy=requirement.get("comparison", {}),
+                        )
+                        filtered = content_units(
+                            path,
+                            required_removal(delta["_before"], requirement),
+                            format=requirement["format"],
+                            policy=requirement.get("comparison", {}),
+                        )
+                        covered.update(
+                            _signature(u) for u in _difference(before, filtered)
+                        )
+                    item["extra"] = [
+                        u
+                        for u in item["extra"]
+                        if not (
+                            u.get("operation") == "remove" and _signature(u) in covered
+                        )
+                    ]
+                elif absence_satisfied(item["latest"]["_content"], requirement):
+                    item["already_present"].append(
+                        dict(
+                            unit,
+                            operation="absent",
+                            depot_source=item["latest"]["source"],
+                        )
+                    )
+                else:
+                    item["missing"].append(unit)
             for delta in deltas:
                 if delta["action"] not in ("edit", "add"):
-                    item["extra"].append({"operation": "action", "text": "Developer action: " + delta["action"], "changelists": [delta["changelist"]]})
+                    item["extra"].append(
+                        {
+                            "operation": "action",
+                            "text": "Developer action: " + delta["action"],
+                            "changelists": [delta["changelist"]],
+                        }
+                    )
             item["blank_content"] = wanted["diff"] if wanted else ""
         except PerforceTimeout:
             raise
@@ -475,40 +1014,89 @@ def compare_changelist(p4, config, numbers, *, source="auto", catalog=None, prev
             item["missing"] = []
             item["extra"] = []
             item["already_present"] = []
+        if item["latest"]:
+            item["latest"].pop("_content", None)
         for delta in deltas:
-            delta.pop('_unchanged', None)
+            delta.pop("_unchanged", None)
+            delta.pop("_before", None)
+            delta.pop("_after", None)
         explain_file(item)
-        for finding in item['findings']:
-            log(f"{finding['status'].upper()} {path}: {finding['text']}; reason={finding['reason']}")
-        log(f"FILE END {path}: suggested={len(item['suggested'])}; matched={len(item['matched'])}; already present={len(item['already_present'])}; missing={len(item['missing'])}; extra={len(item['extra'])}; errors={len(item['errors'])}.")
+        for finding in item["findings"]:
+            log(
+                f"{finding['status'].upper()} {path}: {finding['text']}; reason={finding['reason']}"
+            )
+        log(
+            f"FILE END {path}: suggested={len(item['suggested'])}; matched={len(item['matched'])}; already present={len(item['already_present'])}; missing={len(item['missing'])}; extra={len(item['extra'])}; errors={len(item['errors'])}."
+        )
         results.append(item)
     for change in changes:
         log(f"Rechecking CL {change['number']} metadata for changes during comparison.")
-        current = p4.describe_change(change["number"], shelved=change["content_source"] == "shelved")
-        if current != {key: value for key, value in change.items() if key != "content_source"}:
-            raise PerforceError(f"CL {change['number']} changed during comparison; generate a fresh report")
+        current = p4.describe_change(
+            change["number"], shelved=change["content_source"] == "shelved"
+        )
+        if current != {
+            key: value for key, value in change.items() if key != "content_source"
+        }:
+            raise PerforceError(
+                f"CL {change['number']} changed during comparison; generate a fresh report"
+            )
     for local, path, number, expected_hash in pending_reads:
         log(f"Rechecking pending CL {number} content hash: {path}")
-        content = local.read_bytes() if local is not None else p4.read_shelved_file(path, number)
+        content = (
+            local.read_bytes()
+            if local is not None
+            else p4.read_shelved_file(path, number)
+        )
         if digest(content) != expected_hash:
-            raise PerforceError(f"CL {number} file content changed during comparison: {path}")
-    counts = {"changelists": len(changes), "blank_plan_files": len(planned),
-              "preview_rules": len({preview["rule"] for preview in plan["previews"] if not _excluded_header(preview["target_path"])}), "developer_files": len(developer),
-              "missing_files": sum(bool(item["missing"]) for item in results),
-              "extra_files": sum(item["extra_file"] for item in results),
-              "extra_changes": sum(bool(item["extra"]) for item in results),
-              "matched_items": sum(len(item["matched"]) for item in results),
-              "already_present_items": sum(len(item["already_present"]) for item in results),
-              "unreadable_files": sum(bool(item["errors"]) for item in results)}
-    counts.update(suggested_items=sum(len(item['suggested']) for item in results),
-                  missing_items=sum(len(item['missing']) for item in results),
-                  extra_items=sum(len(item['extra']) for item in results),
-                  value_differences=sum(finding['status'] == 'different_value' for item in results for finding in item['findings']))
+            raise PerforceError(
+                f"CL {number} file content changed during comparison: {path}"
+            )
+    counts = {
+        "changelists": len(changes),
+        "blank_plan_files": len(planned),
+        "preview_rules": len(
+            {
+                preview["rule"]
+                for preview in plan["previews"]
+                if not _excluded(preview["target_path"], plan)
+            }
+        ),
+        "developer_files": len(developer),
+        "missing_files": sum(bool(item["missing"]) for item in results),
+        "extra_files": sum(item["extra_file"] for item in results),
+        "extra_changes": sum(bool(item["extra"]) for item in results),
+        "matched_items": sum(len(item["matched"]) for item in results),
+        "already_present_items": sum(len(item["already_present"]) for item in results),
+        "unreadable_files": sum(bool(item["errors"]) for item in results),
+    }
+    counts.update(
+        suggested_items=sum(len(item["suggested"]) for item in results),
+        missing_items=sum(len(item["missing"]) for item in results),
+        extra_items=sum(len(item["extra"]) for item in results),
+        value_differences=sum(
+            finding["status"] == "different_value"
+            for item in results
+            for finding in item["findings"]
+        ),
+    )
     log("END: " + json.dumps(counts))
-    return {"schema_version": 4, "run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(), "changelists": changes,
-            "comparison_basis": "Tab 4 Empty-file preview versus selected changelist edits, with latest depot content checked for uncovered suggestions.",
-            "warnings": warnings + mapping_errors, "counts": counts, "files": results, "plan": plan,
-            "incomplete": bool(not plan["previews"] or mapping_errors or counts["unreadable_files"] or any(check["status"] == "blocked" for check in plan["checks"]))}
+    return {
+        "schema_version": 5,
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "changelists": changes,
+        "comparison_basis": "Tab 4 Empty-file preview versus selected changelist edits, with latest depot content checked for uncovered suggestions.",
+        "warnings": warnings + mapping_errors,
+        "counts": counts,
+        "files": results,
+        "plan": plan,
+        "incomplete": bool(
+            not plan["previews"]
+            or mapping_errors
+            or counts["unreadable_files"]
+            or any(check["status"] == "blocked" for check in plan["checks"])
+        ),
+    }
 
 
 def comparison_summary(report):
@@ -518,7 +1106,9 @@ def comparison_summary(report):
 def save_comparison(report, directory):
     directory = Path(directory)
     save_plan(report["plan"], directory / "blank-plan")
-    (directory / "comparison.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    (directory / "comparison.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     output = directory / "comparison.txt"
     output.write_text(comparison_summary(report), encoding="utf-8")
     return output

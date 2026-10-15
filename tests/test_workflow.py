@@ -532,9 +532,9 @@ class WorkflowTests(unittest.TestCase):
         self.p4.read_file = read_plain_only
         plan = self.build()
         for path in expected:
-            self.assertTrue(any(f"CSC carrier file found: {path} (text)" in message for message in log_messages))
+            self.assertTrue(any(f"CSC JSON file found: {path} (text)" in message for message in log_messages))
             src = path.replace("COOSA_CSC", "BENI_CSC")
-            self.assertTrue(any(f"CSC carrier file found: {src} (text)" in message for message in log_messages))
+            self.assertTrue(any(f"CSC JSON file found: {src} (text)" in message for message in log_messages))
         self.assertFalse(any("CSC region skipped:" in message or "CSC directory skipped:" in message
                              for message in log_messages))
         changes = [change for change in plan["changes"] if "csc.features" in change["rules"]]
@@ -668,7 +668,9 @@ class WorkflowTests(unittest.TestCase):
     def test_editable_header_path_with_model_placeholder_copies_new_location(self):
         from bt_delta.catalog import default_catalog
         catalog = default_catalog()
-        catalog['model_common_files']['bluetooth_header'] = ['Bluetooth/bdroid_buildcfg.h', 'BT/{model}_buildcfg.h']
+        for role in ('reference', 'current'):
+            file = catalog['files'][role + '.system.bluetooth_header']
+            file['routes'].append({**file['routes'][0], 'relative': file['routes'][0]['relative'].replace('Bluetooth/bdroid_buildcfg.h', 'BT/${' + role + '.model}_buildcfg.h')})
         old = next(p for p in self.p4.data if 'PROD_BENI' in p and 'm36x_sssi' in p and p.endswith('bdroid_buildcfg.h'))
         new = old.replace('Bluetooth/bdroid_buildcfg.h', 'BT/m36x_buildcfg.h')
         self.p4.data[new] = self.p4.data.pop(old)

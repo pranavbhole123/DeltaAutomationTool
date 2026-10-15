@@ -99,7 +99,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(any('_CSC/' in path for path, revision in self.p4.reads))
         self.assertTrue(self.file(report, board['path'])['matched'])
         self.assertFalse(any(item['rule'] == 'csc.features' for item in report['plan']['previews']))
-        self.assertIn('CSC feature file skipped: ' + carrier['path'], comparison_summary(report))
+        self.assertIn('excluded by rule-file comparison policy: ' + carrier['path'], comparison_summary(report))
 
     def test_changing_csc_checkbox_rejects_previous_preview_baseline(self):
         source_plan = Planner(self.p4, self.config).build()
@@ -433,7 +433,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('BENI', source['reference_path'])
         self.assertIsInstance(source['reference_revision'], int)
         self.assertTrue(source['worksheet'])
-        self.assertEqual(report['schema_version'], 4)
+        self.assertEqual(report['schema_version'], 5)
         self.assertGreater(report['counts']['value_differences'], 0)
         text = comparison_summary(report)
         self.assertIn('Tool suggests: BOARD_HAVE_BLUETOOTH := true', text)
@@ -495,7 +495,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn('no tab-4 content suggestion', item['findings'][0]['reason'])
         text = comparison_summary(report)
         block = text[text.index('FILE ' + str(report['files'].index(item) + 1) + '/') :]
-        for section in ('1. WHAT THE TOOL SUGGESTS ADDING', '2. WHAT EACH CHANGELIST ACTUALLY CHANGED',
+        for section in ('1. WHAT THE TOOL REQUIRES', '2. WHAT EACH CHANGELIST ACTUALLY CHANGED',
                         '3. COMBINED EFFECT', '4. SUGGESTION VERSUS DEVELOPER RESULT'):
             self.assertIn(section, block)
         self.assertIn('+ ADD: developer content [CL 100; line 1]', block)
@@ -613,7 +613,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_floating_feature_is_absent_from_default_and_blank_plans(self):
         from bt_delta.catalog import default_catalog
-        self.assertNotIn('floating_feature', default_catalog()['path_rules']['system'])
+        self.assertNotIn('floating_feature', {name.rsplit('.',1)[-1] for name in default_catalog()['files'] if '.system.' in name})
         self.assertFalse(any(rule['id'] == 'system.floating' for rule in default_catalog()['rules']))
         self.assertFalse(any('floating' in entry['path'].lower() for entry in self.blank['changes']))
         self.assertFalse(any(check['rule'] == 'system.floating' for check in self.blank['checks']))

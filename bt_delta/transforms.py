@@ -209,6 +209,9 @@ def _assignments(text: str, action: dict, *, report=None) -> str:
 
 
 def _make_packages(text: str, action: dict, *, report=None) -> str:
+    variable = action.get("variable", "PRODUCT_PACKAGES")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", variable):
+        raise TransformError("Invalid list variable")
     packages = []
     for item in action.get("packages", []):
         package = _one_line(item, "package")
@@ -222,7 +225,7 @@ def _make_packages(text: str, action: dict, *, report=None) -> str:
     locations = {}
     for start, _, logical, depth in _make_statements(text):
         match = _ASSIGNMENT.match(logical)
-        if not match or match["key"] != "PRODUCT_PACKAGES":
+        if not match or match["key"] != variable:
             continue
         tokens = set(match["value"].split())
         for token in tokens:
@@ -252,8 +255,8 @@ def _make_packages(text: str, action: dict, *, report=None) -> str:
     if not missing:
         return text
     if len(missing) == 1:
-        return _append(text, ["PRODUCT_PACKAGES += " + missing[0]])
-    block = ["PRODUCT_PACKAGES += \\"]
+        return _append(text, [variable + " += " + missing[0]])
+    block = [variable + " += \\"]
     block.extend("    " + item + (" \\" if i + 1 < len(missing) else "")
                  for i, item in enumerate(missing))
     return _append(text, block)
@@ -279,12 +282,6 @@ def _command_key(tokens: list[str]):
     return tuple(tokens)
 
 
-_BT_CONTEXT = re.compile(
-    r"(?i)(?:\bbluetooth\b|\bbluedroid\b|\bbt\b|bt_config|bdaddr|btpower|"
-    r"/proc/bluetooth|ttySAC|ssrdump)"
-)
-
-
 def _init_stanza_ranges(lines: list[str], event: str) -> list[tuple[int, int]]:
     starts = []
     for i, line in enumerate(lines):
@@ -307,8 +304,8 @@ def _init_stanza_ranges(lines: list[str], event: str) -> list[tuple[int, int]]:
 
 
 def _select_init_stanza(lines: list[str], ranges: list[tuple[int, int]],
-                        commands: list[tuple[str, list[str], object]], event: str):
-    """Choose a repeated event using exact commands, targets, then BT context."""
+                        commands: list[tuple[str, list[str], object]], event: str, context_patterns=()):
+    """Choose a repeated event using exact commands, targets, then declared context."""
     scored = []
     requested = {key: tokens for _, tokens, key in commands}
     for start, end in ranges:
@@ -321,7 +318,7 @@ def _select_init_stanza(lines: list[str], ranges: list[tuple[int, int]],
                 if key in requested:
                     targets += 1
                     exact += tokens == requested[key]
-            context += bool(_BT_CONTEXT.search(code)) + bool(_BT_CONTEXT.search(comment))
+            context += any(re.search(p, code) for p in context_patterns) + any(re.search(p, comment) for p in context_patterns)
         # Exact requested commands dominate, target matches handle changed
         # permissions/owners, and comments only break ties or identify a BT block.
         scored.append((exact * 100 + targets * 10 + min(context, 9), start, end,
@@ -330,7 +327,7 @@ def _select_init_stanza(lines: list[str], ranges: list[tuple[int, int]],
     best = [row for row in scored if row[0] == best_score]
     if best_score == 0 or len(best) != 1:
         details = ", ".join(
-            f"line {start + 1}: exact={exact}, targets={targets}, bt_context={context}"
+            f"line {start + 1}: exact={exact}, targets={targets}, context={context}"
             for _, start, _, exact, targets, context in scored)
         raise TransformError(f"Multiple matching init stanzas remain ambiguous: {event} ({details})")
     return best[0][1], best[0][2]
@@ -392,8 +389,11 @@ def _init_commands(text: str, action: dict, *, report=None) -> str:
         if lines and _continued(lines[-1]):
             raise TransformError("Cannot append after an unfinished init continuation")
         return _append(text, [event] + ["    " + command for command, _, _ in commands])
+    if len(ranges) > 1 and all(any(actual == tokens and header == event for _, actual, header in elsewhere.get(key, [])) for _, tokens, key in commands):
+        # All requirements already hold in this event; no insertion site is needed.
+        return text
     start, end = (ranges[0] if len(ranges) == 1
-                  else _select_init_stanza(lines, ranges, commands, event))
+                  else _select_init_stanza(lines, ranges, commands, event, action.get("context_patterns", [])))
     existing = {}
     for i in range(start + 1, end):
         code, _ = _comment(_body(lines[i]))

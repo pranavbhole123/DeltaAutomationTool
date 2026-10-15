@@ -1,0 +1,386 @@
+{
+  "schema_version": 2,
+  "id": "camera-example",
+  "title": "Camera configuration example",
+  "inputs": {
+    "baseline_template": {
+      "type": "string",
+      "required": true,
+      "label": "Baseline template"
+    },
+    "destination_template": {
+      "type": "string",
+      "required": true,
+      "label": "Destination template"
+    },
+    "component": {
+      "type": "string",
+      "default": "camera",
+      "pattern": "[a-z][a-z0-9_-]*",
+      "label": "Component"
+    }
+  },
+  "sources": {
+    "baseline": {
+      "kind": "template",
+      "input": "baseline_template",
+      "role": "reference"
+    },
+    "release": {
+      "kind": "template",
+      "input": "destination_template",
+      "role": "current"
+    }
+  },
+  "derive": {
+    "component": {
+      "value": {
+        "input": "component"
+      }
+    }
+  },
+  "files": {
+    "old.board": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "src/${component}/board.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "CAMERA_MODULES"
+        ]
+      }
+    },
+    "old.modules": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "src/${component}/modules.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "CAMERA_MODULES"
+        ]
+      }
+    },
+    "old.startup": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "client_relative": "src/${component}/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "old.devices": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "src/${component}/devices.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "device": [
+            "@name"
+          ]
+        },
+        "mode": "requirements"
+      }
+    },
+    "old.settings": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "json",
+      "routes": [
+        {
+          "client_relative": "src/${component}/settings.json"
+        }
+      ],
+      "comparison": {
+        "mode": "requirements"
+      }
+    },
+    "old.legacy": {
+      "source": "baseline",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "src/${component}/legacy.conf"
+        }
+      ]
+    },
+    "old.assets": {
+      "source": "baseline",
+      "kind": "tree",
+      "format": "binary",
+      "routes": [
+        {
+          "client_relative": "src/${component}/assets"
+        }
+      ]
+    },
+    "new.board": {
+      "source": "release",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "src/${component}/board.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "CAMERA_MODULES"
+        ]
+      }
+    },
+    "new.modules": {
+      "source": "release",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "src/${component}/modules.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "CAMERA_MODULES"
+        ]
+      }
+    },
+    "new.startup": {
+      "source": "release",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "client_relative": "src/${component}/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "new.devices": {
+      "source": "release",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "src/${component}/devices.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "device": [
+            "@name"
+          ]
+        },
+        "mode": "requirements"
+      }
+    },
+    "new.settings": {
+      "source": "release",
+      "kind": "file",
+      "format": "json",
+      "routes": [
+        {
+          "client_relative": "src/${component}/settings.json"
+        }
+      ],
+      "comparison": {
+        "mode": "requirements"
+      }
+    },
+    "new.legacy": {
+      "source": "release",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "src/${component}/legacy.conf"
+        }
+      ]
+    },
+    "new.assets": {
+      "source": "release",
+      "kind": "tree",
+      "format": "binary",
+      "routes": [
+        {
+          "client_relative": "src/${component}/assets"
+        }
+      ]
+    }
+  },
+  "rules": [
+    {
+      "id": "configure.board",
+      "title": "Configure board",
+      "steps": [
+        {
+          "op": "make.ensure",
+          "from": {
+            "file": "old.board"
+          },
+          "to": {
+            "file": "new.board"
+          },
+          "select": {
+            "assignment_patterns": [
+              "^CAMERA_"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure.modules",
+      "title": "Configure modules",
+      "steps": [
+        {
+          "op": "make.packages",
+          "from": {
+            "file": "old.modules"
+          },
+          "to": {
+            "file": "new.modules"
+          },
+          "select": {
+            "variable": "CAMERA_MODULES",
+            "patterns": [
+              "^camera_"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure.startup",
+      "title": "Configure startup",
+      "steps": [
+        {
+          "op": "init.ensure",
+          "from": {
+            "file": "old.startup"
+          },
+          "to": {
+            "file": "new.startup"
+          },
+          "select": {
+            "command_patterns": [
+              "/data/vendor/camera"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure.devices",
+      "title": "Configure devices",
+      "steps": [
+        {
+          "op": "xml.ensure",
+          "from": {
+            "file": "old.devices"
+          },
+          "to": {
+            "file": "new.devices"
+          },
+          "select": {
+            "path": "./device",
+            "name_path": "@name",
+            "names": [
+              "front"
+            ]
+          },
+          "identity": [
+            "@name"
+          ],
+          "fields": [
+            {
+              "path": "version",
+              "compare": "minimum_version"
+            },
+            {
+              "path": "driver",
+              "compare": "equal"
+            }
+          ],
+          "policy": {
+            "on_value_difference": "review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure.settings",
+      "title": "Configure settings",
+      "steps": [
+        {
+          "op": "json.merge_missing",
+          "from": {
+            "file": "old.settings"
+          },
+          "to": {
+            "file": "new.settings"
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure.assets",
+      "title": "Configure assets",
+      "steps": [
+        {
+          "op": "tree.copy_missing",
+          "from": {
+            "file": "old.assets"
+          },
+          "to": {
+            "file": "new.assets"
+          },
+          "pairing": {
+            "method": "tree_relative"
+          }
+        }
+      ]
+    },
+    {
+      "id": "remove.legacy",
+      "title": "Remove deprecated camera switch",
+      "steps": [
+        {
+          "op": "text.remove",
+          "to": {
+            "file": "new.legacy"
+          },
+          "select": {
+            "patterns": [
+              "^camera\\.legacy="
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "report": {
+    "changelist": "Configure ${component} from the approved reference"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "baseline_commit": "ae225ac",
+  "note": "Synthetic SLSI fixture output before the JSON v2 refactor, with CSC enabled.",
+  "normal": {
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/Bluetooth/bdroid_buildcfg.h": "4e70120ded182f0d6928d87c3bde83c28c53d2aac78de878d3481575878a9452",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/BoardConfigCommon.mk": "f161c86435f87ffc24e3ef236f2312b72ba85dda660a9ec6934e14ab8e6c655f",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/device_common.mk": "2ae0c919cf7f1317ea16c91776b5f8fd6149044e5353101e767b2c51c451dfc6",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/vendor/m36x_common/SecProductFeature.common": "41f920372dd9c5037b631d871f3165b1906a92c4e34cea9ba9d4f335d4c35027",
+    "//COOSA/SYSTEM/SYSTEM_Q2/Strawberry/ESSI/android/system/core/rootdir/init.rc": "a2f679f155ab1246e1bc1473e294d27d4e6ad461f57cfbe69f37b426b759570f",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/Bluetooth/bdroid_buildcfg.h": "4e70120ded182f0d6928d87c3bde83c28c53d2aac78de878d3481575878a9452",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/BoardConfigCommon.mk": "f161c86435f87ffc24e3ef236f2312b72ba85dda660a9ec6934e14ab8e6c655f",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/device_common.mk": "567031831408c37be676a0ad629349b9d6ea1410cbbca481289ae2d177b05f19",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/init.m36x.rc": "7ce0b5cdbcaac4b2ea19cb505a7cc28b715217055219b34e61553f3aeac35ce2",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/vendor/m36x_common/SecProductFeature.common": "41f920372dd9c5037b631d871f3165b1906a92c4e34cea9ba9d4f335d4c35027",
+    "//COOSA/VENDOR/SYSTEM/Strawberry/ESSI/android/system/core/rootdir/init.rc": "56d3c73a8300cab07e4ff11dd3fade583ed8bc71102b732f4c7716659a3ee161"
+  },
+  "blank": {
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/Bluetooth/bdroid_buildcfg.h": "4e70120ded182f0d6928d87c3bde83c28c53d2aac78de878d3481575878a9452",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/BoardConfigCommon.mk": "b24edcaf754a569ea9beee6ddd9fa04bae89bd25c459bf3673b156a997dc16f9",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/device/m36x_common/device_common.mk": "217e77dc7128c8d4c17f69f881aca79da7a9a7062e58f02e6d79616f3dea2cbb",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_sssi/vendor/m36x_common/SecProductFeature.common": "e98e4184990ebfbe82a4eb349a59239b533b62ec89df27317beaa03bec436447",
+    "//COOSA_CSC/m36x/OMC/ODM/INS/system/customer_carrier_feature_plain.json": "5841dab0b1b6fb446d0340ad417b30bc56182b7293f3f940f41a620e531e4873",
+    "//COOSA/SYSTEM/SYSTEM_Q2/Strawberry/ESSI/android/system/core/rootdir/init.rc": "228153b13d70902a10570c004c1b8d91a85485cac46ede47637003ae28db6c7a",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/Bluetooth/bdroid_buildcfg.h": "4e70120ded182f0d6928d87c3bde83c28c53d2aac78de878d3481575878a9452",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/BoardConfigCommon.mk": "753d4844b1fec537b5549ca2a1dfc1a8447770a0a0b125fa93a563725626f8c0",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/device_common.mk": "80a56a2173abbfac6daf3de9e44e08c94d5ad63202a3e01a37c845cf2656504f",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/device/m36x_common/init.m36x.rc": "6d74b61ca121065e157c28b626befc2260ce6fa656ba49d57b99ae416a5d89d6",
+    "//MODEL/PROD_COOSA/ONEUI_9_0/FLUMEN/Strawberry/EXYNOS/m36x_vendor/vendor/m36x_common/SecProductFeature.common": "e98e4184990ebfbe82a4eb349a59239b533b62ec89df27317beaa03bec436447",
+    "//COOSA/VENDOR/SYSTEM/Strawberry/ESSI/android/system/core/rootdir/init.rc": "b13ead90ae697a4f7476a1c951d3342d35944da84f63881cc501b3783c494f1e",
+    "//COOSA/VENDOR/VENDOR/Cinnamon/vendor/samsung/hardware/vendor/bluetooth/slsi/s5e8835/bluetooth.mk": "7c9c44076b315be18ec897c69f742b4441225ca3fdd474a37f43dc8881f1aad0"
+  }
+}

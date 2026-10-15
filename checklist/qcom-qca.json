@@ -1,0 +1,1415 @@
+{
+  "schema_version": 2,
+  "id": "qcom-qca",
+  "title": "QCOM-QCA Bluetooth Delta",
+  "source": "159551_BT Delta Checklist.xlsx / QCOM-QCA",
+  "inputs": {
+    "reference.vendor_template": {
+      "type": "string",
+      "label": "Reference vendor template",
+      "required": true
+    },
+    "current.vendor_template": {
+      "type": "string",
+      "label": "Current vendor template",
+      "required": true
+    },
+    "model": {
+      "type": "string",
+      "label": "Reference model (also current when log is blank)",
+      "required": true,
+      "pattern": "[A-Za-z0-9_.-]+"
+    },
+    "radio_chip": {
+      "type": "string",
+      "label": "WLAN / Bluetooth chip (optional; infer from reference)",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+"
+    },
+    "current_log_path": {
+      "type": "path",
+      "label": "Current vendor build log (optional)",
+      "default": ""
+    },
+    "board_platform": {
+      "type": "string",
+      "label": "AP / target board (optional; infer from reference)",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+"
+    },
+    "current_board_platform": {
+      "type": "string",
+      "label": "Current target board override (optional)",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+"
+    },
+    "ant_support": {
+      "type": "choice",
+      "label": "ANT+ eligibility",
+      "choices": [
+        "infer",
+        "enabled",
+        "disabled"
+      ],
+      "default": "infer",
+      "help": "Infer uses reference BOARD_ANT_WIRELESS_DEVICE support. Unresolved eligibility requires review."
+    },
+    "jdm": {
+      "type": "boolean",
+      "label": "JDM",
+      "default": false
+    },
+    "slsi_ap": {
+      "type": "choice",
+      "label": "AP is SLSI",
+      "choices": [
+        "unknown",
+        "yes",
+        "no"
+      ],
+      "default": "unknown"
+    },
+    "hearing_aid": {
+      "type": "choice",
+      "label": "Hearing aid eligibility",
+      "choices": [
+        "infer",
+        "enabled",
+        "disabled"
+      ],
+      "default": "infer"
+    }
+  },
+  "sources": {
+    "reference.vendor": {
+      "kind": "template",
+      "input": "reference.vendor_template",
+      "role": "reference"
+    },
+    "current.vendor": {
+      "kind": "template",
+      "input": "current.vendor_template",
+      "role": "current"
+    }
+  },
+  "lookups": {
+    "firmware": {
+      "qca6174": "btfw32.tlv",
+      "qca9377": "rampatch_tlv_tf_1.1.tlv"
+    }
+  },
+  "derive": {
+    "reference.model": {
+      "value": {
+        "input": "model"
+      }
+    },
+    "log.model": {
+      "value": {
+        "log": {
+          "input": "current_log_path",
+          "label": "TARGET",
+          "pattern": "(?im)^\\s*TARGET\\s*:\\s*(.*?)\\s*$",
+          "destination": "current model"
+        }
+      },
+      "export": "current.build_log_inputs.model"
+    },
+    "log.board": {
+      "value": {
+        "log": {
+          "input": "current_log_path",
+          "label": "target_board",
+          "pattern": "(?im)^\\s*(?:target_board|TARGET_BOARD_PLATFORM)\\s*[:=]\\s*(.*?)\\s*$",
+          "destination": "current AP folder"
+        }
+      },
+      "export": "current.build_log_inputs.board_platform"
+    },
+    "current.model": {
+      "value": {
+        "coalesce": [
+          {
+            "var": "log.model"
+          },
+          {
+            "var": "reference.model"
+          }
+        ]
+      }
+    },
+    "reference.common": {
+      "value": {
+        "template": "${reference.model}_common"
+      }
+    },
+    "current.common": {
+      "value": {
+        "template": "${current.model}_common"
+      }
+    },
+    "reference.chip": {
+      "value": {
+        "lower": {
+          "coalesce": [
+            {
+              "input": "radio_chip"
+            },
+            {
+              "assignment": {
+                "file": "reference.vendor.board",
+                "key": "WLAN_CHIP"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "current.chip": {
+      "value": {
+        "var": "reference.chip"
+      }
+    },
+    "reference.ap": {
+      "value": {
+        "lower": {
+          "coalesce": [
+            {
+              "input": "board_platform"
+            },
+            {
+              "assignment": {
+                "file": "reference.vendor.board",
+                "key": "TARGET_BOARD_PLATFORM"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "current.ap": {
+      "value": {
+        "coalesce": [
+          {
+            "input": "current_board_platform"
+          },
+          {
+            "var": "log.board"
+          },
+          {
+            "var": "reference.ap"
+          }
+        ]
+      }
+    },
+    "current.firmware": {
+      "value": {
+        "lookup": {
+          "table": "firmware",
+          "key": {
+            "var": "current.chip"
+          }
+        }
+      }
+    },
+    "ant.enabled": {
+      "value": {
+        "if": {
+          "eq": [
+            {
+              "input": "ant_support"
+            },
+            "infer"
+          ]
+        },
+        "then": {
+          "eq": [
+            {
+              "lower": {
+                "assignment": {
+                  "file": "reference.vendor.board",
+                  "key": "BOARD_ANT_WIRELESS_DEVICE"
+                }
+              }
+            },
+            "qualcomm-uart"
+          ]
+        },
+        "else": {
+          "eq": [
+            {
+              "input": "ant_support"
+            },
+            "enabled"
+          ]
+        }
+      }
+    },
+    "hearing.enabled": {
+      "value": {
+        "if": {
+          "any": [
+            {
+              "input": "jdm"
+            },
+            {
+              "eq": [
+                {
+                  "lower": {
+                    "var": "current.ap"
+                  }
+                },
+                "msm8998"
+              ]
+            }
+          ]
+        },
+        "then": false,
+        "else": {
+          "if": {
+            "eq": [
+              {
+                "input": "hearing_aid"
+              },
+              "infer"
+            ]
+          },
+          "then": {
+            "if": {
+              "present": {
+                "var": "current.ap"
+              }
+            },
+            "then": true,
+            "else": null
+          },
+          "else": {
+            "eq": [
+              {
+                "input": "hearing_aid"
+              },
+              "enabled"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "files": {
+    "reference.vendor.board": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${reference.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${reference.model}_vendor/device/${reference.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${reference.model}/device/${reference.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${reference.model}/device/${reference.common}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "current.vendor.board": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${current.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${current.model}_vendor/device/${current.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${current.model}/device/${current.common}/BoardConfigCommon.mk"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${current.model}/device/${current.common}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "reference.vendor.packages": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${reference.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${reference.model}_vendor/device/${reference.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${reference.model}/device/${reference.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${reference.model}/device/${reference.common}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "current.vendor.packages": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${current.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${current.model}_vendor/device/${current.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${current.model}/device/${current.common}/device_common.mk"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${current.model}/device/${current.common}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "reference.vendor.features": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/vendor/samsung/configs/${reference.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${reference.model}_vendor/vendor/${reference.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${reference.model}/vendor/${reference.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${reference.model}/vendor/${reference.common}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "current.vendor.features": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/vendor/samsung/configs/${current.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${current.model}_vendor/vendor/${current.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${current.model}/vendor/${current.common}/SecProductFeature.common"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${current.model}/vendor/${current.common}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "reference.vendor.header": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${reference.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${reference.model}_vendor/device/${reference.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${reference.model}/device/${reference.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${reference.model}/device/${reference.common}/Bluetooth/bdroid_buildcfg.h"
+        }
+      ],
+      "comparison": {
+        "include": false
+      }
+    },
+    "current.vendor.header": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${current.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${current.model}_vendor/device/${current.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${current.model}/device/${current.common}/Bluetooth/bdroid_buildcfg.h"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${current.model}/device/${current.common}/Bluetooth/bdroid_buildcfg.h"
+        }
+      ],
+      "comparison": {
+        "include": false
+      }
+    },
+    "reference.vendor.init": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/common/rootdir/etc/init.qcom.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "current.vendor.init": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/common/rootdir/etc/init.qcom.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "current.vendor.firmware": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "binary",
+      "routes": [
+        {
+          "client_relative": "android/vendor/qcom/proprietary/bluetooth/hidl_transport/bt/1.0/default/rome/${current.firmware}"
+        },
+        {
+          "anchor_regex": "/Combination/Common/",
+          "relative": "vendor/qcom/proprietary/bluetooth/hidl_transport/bt/1.0/default/rome/${current.firmware}"
+        }
+      ],
+      "comparison": {}
+    },
+    "reference.vendor.base": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/common/base.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "current.vendor.base": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/common/base.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES",
+          "BT"
+        ]
+      }
+    },
+    "reference.vendor.props": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/${reference.ap}/system.prop"
+        }
+      ],
+      "comparison": {}
+    },
+    "current.vendor.props": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "client_relative": "android/device/qcom/${current.ap}/system.prop"
+        }
+      ],
+      "comparison": {}
+    },
+    "reference.vendor.overlay": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${reference.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${reference.model}_vendor/device/${reference.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${reference.model}/device/${reference.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${reference.model}/device/${reference.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "integer": [
+            "@name"
+          ],
+          "bool": [
+            "@name"
+          ]
+        },
+        "mode": "requirements"
+      }
+    },
+    "current.vendor.overlay": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/${current.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "${current.model}_vendor/device/${current.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/Combination/[^/]+/",
+          "relative": "model/${current.model}/device/${current.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "model/${current.model}/device/${current.common}/overlay/frameworks/base/core/res/res/values/config.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "integer": [
+            "@name"
+          ],
+          "bool": [
+            "@name"
+          ]
+        },
+        "mode": "requirements"
+      }
+    },
+    "reference.vendor.manifest": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/common/manifest.xml"
+        }
+      ],
+      "comparison": {
+        "mode": "requirements"
+      }
+    },
+    "current.vendor.manifest": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/device/samsung/common/manifest.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "hal": [
+            "name",
+            "@format"
+          ]
+        },
+        "mode": "requirements"
+      }
+    },
+    "reference.vendor.matrix": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/vendor/qcom/opensource/core-utils/vendor_framework_compatibility_matrix.xml"
+        }
+      ],
+      "comparison": {
+        "mode": "requirements"
+      }
+    },
+    "current.vendor.matrix": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "client_relative": "android/vendor/qcom/opensource/core-utils/vendor_framework_compatibility_matrix.xml"
+        }
+      ],
+      "comparison": {
+        "xml_identity": {
+          "hal": [
+            "name",
+            "@format"
+          ]
+        },
+        "mode": "requirements"
+      }
+    }
+  },
+  "rules": [
+    {
+      "id": "vendor.board",
+      "title": "Reference Bluetooth and WLAN board settings",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B3:B4"
+      },
+      "steps": [
+        {
+          "op": "make.ensure",
+          "from": {
+            "file": "reference.vendor.board"
+          },
+          "to": {
+            "file": "current.vendor.board"
+          },
+          "select": {
+            "assignment_names": [
+              "WLAN_VENDOR",
+              "WLAN_CHIP",
+              "BOARD_HAVE_BLUETOOTH",
+              "BOARD_HAS_QCA_BT_ROME",
+              "BOARD_HAVE_BLUETOOTH_QCOM",
+              "WCNSS_FILTER_USES_SIBS",
+              "BUILD_BT_WCNSS",
+              "BOARD_HAS_QCA_BT_ROME_PCM_SLAVE",
+              "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.ant_board",
+      "title": "Reference ANT board support",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B5"
+      },
+      "steps": [
+        {
+          "op": "make.ensure",
+          "from": {
+            "file": "reference.vendor.board"
+          },
+          "to": {
+            "file": "current.vendor.board"
+          },
+          "select": {
+            "assignment_names": [
+              "BOARD_HAVE_ANT_WIRELESS",
+              "BOARD_ANT_WIRELESS_DEVICE"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review"
+          }
+        }
+      ],
+      "when": {
+        "var": "ant.enabled"
+      }
+    },
+    {
+      "id": "vendor.offload_board",
+      "title": "Remove A2DP offload settings",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B6"
+      },
+      "steps": [
+        {
+          "op": "make.remove",
+          "to": {
+            "file": "current.vendor.board"
+          },
+          "select": {
+            "within": "ifeq.*SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD",
+            "assignment_names": [
+              "TARGET_HAS_SPLIT_A2DP_FEATURE",
+              "TARGET_HAS_BTHOST_IPC",
+              "SEC_BT_DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE"
+            ],
+            "patterns": [
+              "^\\$\\(eval\\s+\\$\\(call\\s+add-device-manifest,\\s*vendor/samsung/interfaces/bluetooth/a2dp/1\\.0/manifest\\.xml\\)\\)$"
+            ],
+            "variable": "DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE",
+            "member_names": [
+              "$(SEC_BT_DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.packages",
+      "title": "Reference Bluetooth packages",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B8"
+      },
+      "steps": [
+        {
+          "op": "make.packages",
+          "from": {
+            "file": "reference.vendor.packages"
+          },
+          "to": {
+            "file": "current.vendor.packages"
+          },
+          "select": {
+            "variable": "PRODUCT_PACKAGES",
+            "names": [
+              "android.hardware.bluetooth@1.0-service-qti",
+              "android.hardware.bluetooth@1.0-impl-qti",
+              "android.hardware.bluetooth@1.0-service-qti.rc",
+              "BluetoothAgent"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.ant_packages",
+      "title": "Reference ANT packages",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B9"
+      },
+      "steps": [
+        {
+          "op": "make.packages",
+          "from": {
+            "file": "reference.vendor.packages"
+          },
+          "to": {
+            "file": "current.vendor.packages"
+          },
+          "select": {
+            "variable": "PRODUCT_PACKAGES",
+            "names": [
+              "com.dsi.ant.antradio_library",
+              "com.dsi.ant.antradio_library.xml",
+              "com.qualcomm.qti.ant@1.0-impl",
+              "com.qualcomm.qti.ant@1.0",
+              "com.qualcomm.qti.ant@1.0_vendor",
+              "AntHalService",
+              "ANTPlusPlugins",
+              "ANTRadioService",
+              "ANTPlusTest"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review"
+          }
+        }
+      ],
+      "when": {
+        "var": "ant.enabled"
+      }
+    },
+    {
+      "id": "vendor.offload_packages",
+      "title": "Remove A2DP offload packages",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B10"
+      },
+      "steps": [
+        {
+          "op": "make.remove",
+          "to": {
+            "file": "current.vendor.packages"
+          },
+          "select": {
+            "variable": "PRODUCT_PACKAGES",
+            "member_names": [
+              "vendor.samsung.hardware.bluetooth.a2dp@1.0-impl",
+              "libbthost_if"
+            ],
+            "within": "ifeq.*SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.legacy_include",
+      "title": "Remove legacy model Bluetooth include",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B11"
+      },
+      "steps": [
+        {
+          "op": "make.remove",
+          "to": {
+            "file": "current.vendor.packages"
+          },
+          "select": {
+            "lines": [
+              "include device/samsung/${current.common}/Bluetooth/Bluetooth.mk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.header",
+      "title": "Copy missing reference build header",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B13"
+      },
+      "steps": [
+        {
+          "op": "file.copy_if_missing",
+          "from": {
+            "file": "reference.vendor.header"
+          },
+          "to": {
+            "file": "current.vendor.header"
+          },
+          "policy": {
+            "on_source_missing": "skip"
+          },
+          "pairing": {
+            "method": "view_relative",
+            "replacements": [
+              [
+                {
+                  "var": "reference.common"
+                },
+                {
+                  "var": "current.common"
+                }
+              ],
+              [
+                {
+                  "var": "reference.model"
+                },
+                {
+                  "var": "current.model"
+                }
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.header_define",
+      "title": "Ensure Qualcomm header define",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B13"
+      },
+      "steps": [
+        {
+          "op": "text.ensure",
+          "to": {
+            "file": "current.vendor.header"
+          },
+          "literal": [
+            "#define BOARD_HAVE_BLUETOOTH_QCOM TRUE"
+          ],
+          "policy": {
+            "on_target_missing": "review",
+            "on_value_difference": "replace"
+          },
+          "select": {
+            "identity_pattern": "^#\\s*define\\s+(BOARD_HAVE_BLUETOOTH_QCOM)\\b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "audio.validation",
+      "title": "Manual checklist verification",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "C13"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "message": "Confirm ESCO_DATA_PATH_INTERFACE I2S/PCM with BT_Audio and verify firmware major/minor versions from its history; neither can be established by copying a header."
+        }
+      ]
+    },
+    {
+      "id": "vendor.features",
+      "title": "Reference Bluetooth product features",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B15"
+      },
+      "steps": [
+        {
+          "op": "make.values",
+          "from": {
+            "file": "reference.vendor.features"
+          },
+          "to": {
+            "file": "current.vendor.features"
+          },
+          "select": {
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_"
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review"
+          },
+          "operator": "="
+        }
+      ]
+    },
+    {
+      "id": "floating.features",
+      "title": "Manual checklist verification",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B15"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "message": "Verify model-specific FloatingFeature flags with previous OS; the worksheet supplies no exact file or flag values."
+        }
+      ]
+    },
+    {
+      "id": "vendor.init",
+      "title": "Reference init commands and permissions",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B17"
+      },
+      "steps": [
+        {
+          "op": "init.ensure",
+          "from": {
+            "file": "reference.vendor.init"
+          },
+          "to": {
+            "file": "current.vendor.init"
+          },
+          "select": {
+            "command_patterns": [
+              "(?i)bluetooth|ro\\.bt\\.|/sys/class/rfkill/"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "review",
+            "on_empty_selection": "review",
+            "context_patterns": [
+              "(?i)bluetooth|bluedroid|\\bBT\\b"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.slsi_init",
+      "title": "SLSI AP dump and power commands",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B17"
+      },
+      "steps": [
+        {
+          "op": "init.ensure",
+          "from": {
+            "file": "reference.vendor.init"
+          },
+          "to": {
+            "file": "current.vendor.init"
+          },
+          "select": {
+            "command_patterns": [
+              "/dev/btpower|/data/vendor/ssrdump"
+            ]
+          },
+          "policy": {
+            "context_patterns": [
+              "(?i)bluetooth|\\bBT\\b"
+            ]
+          }
+        }
+      ],
+      "when": {
+        "eq": [
+          {
+            "input": "slsi_ap"
+          },
+          "yes"
+        ]
+      }
+    },
+    {
+      "id": "vendor.slsi_eligibility",
+      "title": "Resolve SLSI AP eligibility",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B17"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "status": "review",
+          "message": "Select whether the AP is SLSI before checking the B17 btpower/ssrdump commands."
+        }
+      ],
+      "when": {
+        "eq": [
+          {
+            "input": "slsi_ap"
+          },
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "vendor.qti_stack",
+      "title": "Remove Qualcomm Bluetooth stack selections",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B19"
+      },
+      "steps": [
+        {
+          "op": "make.remove",
+          "to": {
+            "file": "current.vendor.base"
+          },
+          "select": {
+            "assignment_names": [
+              "TARGET_USE_QTI_BT_STACK"
+            ],
+            "variable": "BT",
+            "member_names": [
+              "libbluetooth_qti"
+            ]
+          }
+        },
+        {
+          "op": "text.remove",
+          "to": {
+            "file": "current.vendor.props"
+          },
+          "select": {
+            "patterns": [
+              "^ro\\.bluetooth\\.library_name\\s*=\\s*libbluetooth_qti\\.so$"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "device.validation",
+      "title": "Manual checklist verification",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B21:C21"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "message": "On a built phone check firmware with *#2663# and ANT+ with *#533882#; firmware rules check mapped file presence only."
+        }
+      ]
+    },
+    {
+      "id": "gpio.validation",
+      "title": "Manual checklist verification",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B23"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "message": "GPIO files are named as examples, without pin assignments or a patch. Review the model pinctrl / board DTS / gpio DTSI with the hardware owner; no automatic edit is specified."
+        }
+      ]
+    },
+    {
+      "id": "vendor.voltage",
+      "title": "Ensure config_bluetooth_operating_voltage_mv",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B25:C25"
+      },
+      "steps": [
+        {
+          "op": "xml.ensure",
+          "to": {
+            "file": "current.vendor.overlay"
+          },
+          "literal": "<resources><integer name=\"config_bluetooth_operating_voltage_mv\" translatable=\"false\">3700</integer></resources>",
+          "select": {
+            "path": "./integer",
+            "name_path": "@name",
+            "names": [
+              "config_bluetooth_operating_voltage_mv"
+            ]
+          },
+          "identity": [
+            "@name"
+          ],
+          "root": "resources",
+          "policy": {
+            "on_value_difference": "replace",
+            "on_target_missing": "create"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.manifest",
+      "title": "Ensure ISehBluetooth manifest",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B27:C27"
+      },
+      "steps": [
+        {
+          "op": "xml.ensure",
+          "to": {
+            "file": "current.vendor.manifest"
+          },
+          "literal": "<manifest><hal format=\"hidl\" override=\"true\"><name>vendor.samsung.hardware.bluetooth</name><transport>hwbinder</transport><version>2.0</version><interface><name>ISehBluetooth</name><instance>default</instance></interface></hal></manifest>",
+          "select": {
+            "path": ".//hal",
+            "name_path": "name",
+            "names": [
+              "vendor.samsung.hardware.bluetooth"
+            ]
+          },
+          "identity": [
+            "name",
+            "@format"
+          ],
+          "policy": {
+            "on_value_difference": "review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.matrix",
+      "title": "Ensure ISehBluetooth matrix",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B27:C27"
+      },
+      "steps": [
+        {
+          "op": "xml.ensure",
+          "to": {
+            "file": "current.vendor.matrix"
+          },
+          "literal": "<compatibility-matrix><hal format=\"hidl\" optional=\"true\"><name>vendor.samsung.hardware.bluetooth</name><version>2.0</version><interface><name>ISehBluetooth</name><instance>default</instance></interface></hal></compatibility-matrix>",
+          "select": {
+            "path": ".//hal",
+            "name_path": "name",
+            "names": [
+              "vendor.samsung.hardware.bluetooth"
+            ]
+          },
+          "identity": [
+            "name",
+            "@format"
+          ],
+          "policy": {
+            "on_value_difference": "review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vendor.hearing_aid",
+      "title": "Ensure config_hearing_aid_profile_supported",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B29:C29"
+      },
+      "steps": [
+        {
+          "op": "xml.ensure",
+          "to": {
+            "file": "current.vendor.overlay"
+          },
+          "literal": "<resources><bool name=\"config_hearing_aid_profile_supported\">true</bool></resources>",
+          "select": {
+            "path": "./bool",
+            "name_path": "@name",
+            "names": [
+              "config_hearing_aid_profile_supported"
+            ]
+          },
+          "identity": [
+            "@name"
+          ],
+          "root": "resources",
+          "policy": {
+            "on_value_difference": "replace",
+            "on_target_missing": "create"
+          }
+        }
+      ],
+      "when": {
+        "var": "hearing.enabled"
+      }
+    },
+    {
+      "id": "kernel.hid",
+      "title": "Manual checklist verification",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "B31:C31"
+      },
+      "steps": [
+        {
+          "op": "manual",
+          "message": "Inspect the mapped kernel drivers/hid/hid-apple.c and obtain CL 22749548. The worksheet does not include the lines to remove; a kernel patch cannot be inferred."
+        }
+      ]
+    },
+    {
+      "id": "vendor.firmware",
+      "title": "Verify mapped firmware path exists",
+      "provenance": {
+        "sheet": "QCOM-QCA",
+        "range": "C21"
+      },
+      "steps": [
+        {
+          "op": "file.exists",
+          "to": {
+            "file": "current.vendor.firmware"
+          },
+          "message": "Mapped firmware file exists. This check does not read or compare firmware contents or versions.",
+          "assert_path": {
+            "var": "current.firmware"
+          }
+        }
+      ]
+    }
+  ],
+  "report": {
+    "title": "QCOM-QCA Delta report",
+    "changelist": "QCOM-QCA delta for ${current.model}"
+  },
+  "comparison": {
+    "exclude": [
+      {
+        "basename": "bdroid_buildcfg.h",
+        "reason": "Header is copied only when absent; excluded from CL comparison."
+      }
+    ]
+  }
+}

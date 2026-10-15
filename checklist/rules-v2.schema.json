@@ -1,0 +1,2252 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "string",
+              "boolean",
+              "path",
+              "depot",
+              "list",
+              "choice"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "default": {},
+          "required": {
+            "type": "boolean"
+          },
+          "required_when": {
+            "$ref": "#/$defs/expression"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "visible": {
+            "type": "boolean"
+          },
+          "group": {
+            "type": "string"
+          },
+          "derive": {
+            "$ref": "#/$defs/expression"
+          },
+          "help": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "template"
+              },
+              "input": {
+                "type": "string"
+              },
+              "role": {
+                "enum": [
+                  "reference",
+                  "current"
+                ]
+              },
+              "when": {
+                "$ref": "#/$defs/expression"
+              }
+            },
+            "required": [
+              "kind",
+              "input",
+              "role"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "depot_root"
+              },
+              "root": {
+                "$ref": "#/$defs/expression"
+              },
+              "role": {
+                "enum": [
+                  "reference",
+                  "current"
+                ]
+              },
+              "when": {
+                "$ref": "#/$defs/expression"
+              }
+            },
+            "required": [
+              "kind",
+              "root",
+              "role"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "derive": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "$ref": "#/$defs/expression"
+          },
+          "when": {
+            "$ref": "#/$defs/expression"
+          },
+          "export": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "lookups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {}
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "tree"
+            ]
+          },
+          "format": {
+            "enum": [
+              "text",
+              "make",
+              "init",
+              "xml",
+              "json",
+              "binary"
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "anchor_regex": {
+                      "type": "string"
+                    },
+                    "relative": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "anchor_regex",
+                    "relative"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "client_relative": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "client_relative"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "mapped_regex": {
+                      "type": "string"
+                    },
+                    "append": {
+                      "type": "string"
+                    },
+                    "capture": {
+                      "type": "string"
+                    },
+                    "allowed": {
+                      "$ref": "#/$defs/expression"
+                    }
+                  },
+                  "required": [
+                    "mapped_regex",
+                    "append"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "depot": {
+                      "$ref": "#/$defs/expression"
+                    }
+                  },
+                  "required": [
+                    "depot"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "minItems": 1
+          },
+          "filter": {
+            "type": "object",
+            "properties": {
+              "basename": {
+                "type": "string"
+              },
+              "relative_regex": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "comparison": {
+            "type": "object",
+            "properties": {
+              "include": {
+                "type": "boolean"
+              },
+              "latest_scope": {
+                "enum": [
+                  "context",
+                  "file"
+                ]
+              },
+              "list_variables": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "xml_identity": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "mode": {
+                "enum": [
+                  "reference",
+                  "requirements"
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "when": {
+            "$ref": "#/$defs/expression"
+          }
+        },
+        "required": [
+          "source",
+          "kind",
+          "format",
+          "routes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "sheet": {
+                "type": "string"
+              },
+              "range": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sheet",
+              "range"
+            ],
+            "additionalProperties": false
+          },
+          "when": {
+            "$ref": "#/$defs/expression"
+          },
+          "disabled_message": {
+            "type": "string"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/step"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "steps"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "report": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "changelist": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "$ref": "#/$defs/expression"
+          },
+          "message": {
+            "$ref": "#/$defs/expression"
+          }
+        },
+        "required": [
+          "condition",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0
+    },
+    "comparison": {
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "basename": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "when": {
+                    "$ref": "#/$defs/expression"
+                  }
+                },
+                "required": [
+                  "basename"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path_regex": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "when": {
+                    "$ref": "#/$defs/expression"
+                  }
+                },
+                "required": [
+                  "path_regex"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "minItems": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "inputs",
+    "sources",
+    "files",
+    "rules"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://delta-automation.local/rules-v2.schema.json",
+  "title": "Delta Automation rule specification v2",
+  "$defs": {
+    "expression": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "var": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "var"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "input"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "template": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "template"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "file_text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "file_text"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "literal": {}
+              },
+              "required": [
+                "literal"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "coalesce": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 0
+                }
+              },
+              "required": [
+                "coalesce"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "list": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 0
+                }
+              },
+              "required": [
+                "list"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 0
+                }
+              },
+              "required": [
+                "all"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "any": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 0
+                }
+              },
+              "required": [
+                "any"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lower": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "lower"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "strip": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "strip"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "last_digits": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "last_digits"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "not": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "not"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "present": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "present"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "eq": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "eq"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ne": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "ne"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "if": {
+                  "$ref": "#/$defs/expression"
+                },
+                "then": {
+                  "$ref": "#/$defs/expression"
+                },
+                "else": {
+                  "$ref": "#/$defs/expression"
+                }
+              },
+              "required": [
+                "if",
+                "then"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "matches": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "$ref": "#/$defs/expression"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "pattern"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "matches"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lookup": {
+                  "type": "object",
+                  "properties": {
+                    "table": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/expression"
+                    }
+                  },
+                  "required": [
+                    "table",
+                    "key"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lookup"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "assignment": {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file",
+                    "key"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "assignment"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "regex": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "$ref": "#/$defs/expression"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "group": {
+                      "type": [
+                        "string",
+                        "integer"
+                      ]
+                    },
+                    "exclude": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/expression"
+                      },
+                      "minItems": 0
+                    },
+                    "many": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "pattern"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "regex"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "log": {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "group": {
+                      "type": [
+                        "string",
+                        "integer"
+                      ]
+                    },
+                    "destination": {
+                      "type": "string"
+                    },
+                    "value_pattern": {
+                      "type": "string"
+                    },
+                    "lowercase": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "input",
+                    "label",
+                    "pattern"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "log"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "path_root": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "$ref": "#/$defs/expression"
+                    },
+                    "component": {
+                      "$ref": "#/$defs/expression"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "component"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "path_root"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "pairing": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "const": "view_relative"
+                    },
+                    "replacements": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/expression"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": [
+                    "method"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "const": "tree_relative"
+                    }
+                  },
+                  "required": [
+                    "method"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "op": {
+              "const": "file.copy_if_missing"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "from"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "pairing": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "const": "view_relative"
+                    },
+                    "replacements": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/expression"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": [
+                    "method"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "const": "tree_relative"
+                    }
+                  },
+                  "required": [
+                    "method"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "op": {
+              "const": "tree.copy_missing"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "from"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "assert_path": {
+              "$ref": "#/$defs/expression"
+            },
+            "message": {
+              "$ref": "#/$defs/expression"
+            },
+            "op": {
+              "const": "file.exists"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "assert_path": {
+              "$ref": "#/$defs/expression"
+            },
+            "message": {
+              "$ref": "#/$defs/expression"
+            },
+            "op": {
+              "const": "path.assert"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_make_ensure"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_ensure"
+            },
+            "literal": {},
+            "operator": {
+              "enum": [
+                "=",
+                ":=",
+                "?=",
+                "+="
+              ]
+            },
+            "op": {
+              "const": "make.ensure"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_make_values"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_values"
+            },
+            "literal": {},
+            "operator": {
+              "enum": [
+                "=",
+                ":=",
+                "?=",
+                "+="
+              ]
+            },
+            "op": {
+              "const": "make.values"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_make_packages"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_packages"
+            },
+            "literal": {},
+            "op": {
+              "const": "make.packages"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_make_includes"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_includes"
+            },
+            "literal": {},
+            "op": {
+              "const": "make.includes"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_init_ensure"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_init_ensure"
+            },
+            "literal": {},
+            "replacements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old": {
+                    "type": "string"
+                  },
+                  "new": {
+                    "$ref": "#/$defs/expression"
+                  }
+                },
+                "required": [
+                  "old",
+                  "new"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            },
+            "op": {
+              "const": "init.ensure"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_text_ensure"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_text_ensure"
+            },
+            "literal": {},
+            "op": {
+              "const": "text.ensure"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_remove"
+            },
+            "op": {
+              "const": "make.remove"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "select"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_text_remove"
+            },
+            "op": {
+              "const": "text.remove"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "select"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "block": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "body_group": {
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                },
+                "reject_pattern": {
+                  "type": "string"
+                },
+                "contains": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "captures": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "split": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "include_preceding_comment": {
+                  "type": "boolean"
+                },
+                "identity": {
+                  "type": "string"
+                },
+                "compare": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "unrecognized_marker": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern"
+              ],
+              "additionalProperties": false
+            },
+            "choose": {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "$ref": "#/$defs/expression"
+                },
+                "prefix": {
+                  "$ref": "#/$defs/expression"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "single_fallback": {
+                  "type": "boolean"
+                },
+                "required_members": {
+                  "$ref": "#/$defs/expression"
+                },
+                "members_field": {
+                  "type": "string"
+                },
+                "export": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "related": {
+              "type": "object",
+              "properties": {
+                "reference": {
+                  "type": "string"
+                },
+                "current": {
+                  "type": "string"
+                },
+                "suffix": {
+                  "type": "string"
+                },
+                "snapshot": {
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "op": {
+              "const": "block.sync"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "from",
+            "block",
+            "choose"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "block": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "body_group": {
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                },
+                "reject_pattern": {
+                  "type": "string"
+                },
+                "contains": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "captures": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "split": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "include_preceding_comment": {
+                  "type": "boolean"
+                },
+                "identity": {
+                  "type": "string"
+                },
+                "compare": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "unrecognized_marker": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern"
+              ],
+              "additionalProperties": false
+            },
+            "op": {
+              "const": "block.remove"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "block"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_xml_ensure"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_xml_ensure"
+            },
+            "literal": {},
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "compare": {
+                    "enum": [
+                      "equal",
+                      "subset",
+                      "minimum_version"
+                    ]
+                  },
+                  "tuple": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            },
+            "identity": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "parent": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "op": {
+              "const": "xml.ensure"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "identity"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_xml_verify"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_xml_verify"
+            },
+            "literal": {},
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "compare": {
+                    "enum": [
+                      "equal",
+                      "subset",
+                      "minimum_version"
+                    ]
+                  },
+                  "tuple": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            },
+            "identity": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "op": {
+              "const": "xml.verify"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "identity"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "inventory": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "markers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "filename_prefix": {
+                  "type": "string"
+                },
+                "parent_dirs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "op": {
+              "const": "json.merge_missing"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "from"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/expression"
+            },
+            "message": {
+              "$ref": "#/$defs/expression"
+            },
+            "status": {
+              "enum": [
+                "blocked",
+                "review",
+                "manual"
+              ]
+            },
+            "op": {
+              "const": "assert"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "message",
+            "condition"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/expression"
+            },
+            "status": {
+              "enum": [
+                "blocked",
+                "review",
+                "manual"
+              ]
+            },
+            "op": {
+              "const": "manual"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "on_source_missing": {
+          "enum": [
+            "skip",
+            "review",
+            "block"
+          ]
+        },
+        "on_target_missing": {
+          "enum": [
+            "skip",
+            "review",
+            "block",
+            "create"
+          ]
+        },
+        "on_empty_selection": {
+          "enum": [
+            "skip",
+            "review",
+            "block"
+          ]
+        },
+        "on_value_difference": {
+          "enum": [
+            "replace",
+            "review",
+            "preserve"
+          ]
+        },
+        "report_current_only": {
+          "type": "boolean"
+        },
+        "context_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "on_missing": {
+          "enum": [
+            "skip",
+            "review",
+            "block"
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "file_ref": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "select_make_ensure": {
+      "type": "object",
+      "properties": {
+        "assignment_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assignment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_basenames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_make_values": {
+      "type": "object",
+      "properties": {
+        "prefix": {
+          "type": "string"
+        },
+        "assignment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_make_packages": {
+      "type": "object",
+      "properties": {
+        "variable": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "variable"
+      ],
+      "additionalProperties": false
+    },
+    "select_make_includes": {
+      "type": "object",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_init_ensure": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_text_ensure": {
+      "type": "object",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "identity_pattern": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_make_remove": {
+      "type": "object",
+      "properties": {
+        "assignment_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assignment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "variable": {
+          "type": "string"
+        },
+        "member_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "member_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "within": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_text_remove": {
+      "type": "object",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "select_xml_ensure": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name_path": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "select_xml_verify": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name_path": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

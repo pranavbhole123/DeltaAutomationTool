@@ -1,4 +1,5 @@
 """Read-only planning, revision snapshots, explicit checks and exact file diffs."""
+
 from __future__ import annotations
 
 import base64
@@ -11,14 +12,29 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .catalog import default_catalog
-from .csc import CARRIER_FILENAME, add_missing_features, carrier_files, carrier_json, missing_carrier_message, model_root
-from .config import role_settings, validate
-from .build_log import read_build_log
+from .spec import load_spec, validate_spec, rule_source, get_value, set_value
+from .expressions import Values, Unresolved
+from .operations import (
+    select_actions,
+    apply_actions,
+    remove_content,
+    blocks,
+    xml_operation,
+    xml_selected,
+    xml_field,
+    make_values,
+)
+from .json_ops import merge_missing, json_object
+from .config import validate
+
 from .resolver import DiscoveryMiss, Resolver, relative_for
 from .diagnostics import emit
 from .transforms import TransformError, transform
-from .reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
+from .reference import (
+    apply_reference_action,
+    augment_actions_from_reference,
+    copy_make_settings,
+)
 from .perforce import MappingError, PerforceTimeout, parse_view
 
 
@@ -27,7 +43,9 @@ def digest(value):
 
 
 def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def seal(plan):
@@ -39,209 +57,136 @@ def seal(plan):
 def verify_seal(plan):
     body = {k: v for k, v in plan.items() if k != "digest"}
     if plan.get("digest") != digest(canonical(body)):
-        raise ValueError("Plan was modified or is corrupt. Generate and review a new plan.")
+        raise ValueError(
+            "Plan was modified or is corrupt. Generate and review a new plan."
+        )
 
 
 def decode(data):
-    return data.decode("utf-8-sig"), "utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"
+    return data.decode("utf-8-sig"), (
+        "utf-8-sig" if data.startswith(b"\xef\xbb\xbf") else "utf-8"
+    )
 
 
-def substitute(value, variables):
-    if isinstance(value, str):
-        for key, replacement in variables.items():
-            value = value.replace("{" + key + "}", str(replacement))
-        if re.search(r"\{(?:chipset|firmware|efs)\}", value):
-            raise ValueError(f"Unresolved model setting: {value}")
-        return value
-    if isinstance(value, list):
-        return [substitute(v, variables) for v in value]
-    if isinstance(value, dict):
-        return {k: substitute(v, variables) for k, v in value.items()}
-    return value
-
-
-def name_selector(prefix="", patterns=None):
-    try:
-        compiled = [re.compile(pattern) for pattern in (patterns or [])]
-    except re.error as exc:
-        raise TransformError(f"Invalid Bluetooth name pattern: {exc}") from exc
-    return lambda name: bool(prefix and name.startswith(prefix)) or any(pattern.search(name) for pattern in compiled)
-
-
-def make_values(text, prefix, patterns=None):
-    values = {}
-    selected = name_selector(prefix, patterns)
-    depth = 0
-    for line in text.splitlines():
-        code = line.split("#", 1)[0].strip()
-        if re.match(r"^(ifeq|ifneq|ifdef|ifndef)\b", code):
-            depth += 1
-        if code == "endif":
-            depth -= 1
-        match = re.match(r"^([A-Za-z0-9_]+)\s*(?::=|=|\?=|\+=)\s*(.*?)\s*$", code)
-        if match and selected(match[1]):
-            if depth or match[1] in values or "$(" in match[2] or "${" in match[2] or code.endswith("\\"):
-                raise TransformError(f"Feature {match[1]} is conditional, duplicated or computed; resolve explicitly")
-            values[match[1]] = match[2]
-    return values
-
-
-def hidl_version_at_least(actual, minimum):
-    """Return whether a dotted numeric HIDL version meets the checklist minimum."""
-    try:
-        actual_parts = tuple(int(part) for part in actual.strip().split("."))
-        minimum_parts = tuple(int(part) for part in minimum.strip().split("."))
-    except (AttributeError, ValueError):
-        return False
-    width = max(len(actual_parts), len(minimum_parts))
-    return actual_parts + (0,) * (width - len(actual_parts)) >= minimum_parts + (0,) * (width - len(minimum_parts))
-
-
-def hcf_blocks(source):
-    found = []
-    pattern = r"(?m)^\s*ifneq\s*\(\s*\$\(filter\s+([^,]+),\s*\$\(TARGET_PRODUCT\)\s*\)\s*,\s*\)(.*?)^\s*endif\b[^\r\n]*"
-    for match in re.finditer(pattern, source, re.S):
-        body = match[2]
-        if re.search(r"\b(?:ifeq|ifneq|ifdef|ifndef)\b", body):
-            continue
-        variant_match = re.search(r"\$\(HCF_PATH\)/([A-Za-z0-9_.-]+)", body)
-        if not (variant_match and "$(TARGET_COPY_OUT_VENDOR)/firmware/wifi" in body and
-                "PRODUCT_COPY_FILES" in body and "find-copy-subdir-files" in body):
-            continue
-        start = match.start()
-        line_start = source.rfind("\n", 0, start) + 1
-        previous_end = max(0, line_start - 1)
-        previous_start = source.rfind("\n", 0, previous_end) + 1
-        if source[previous_start:previous_end].strip().startswith("#"):
-            start = previous_start
-        found.append({"variant": variant_match[1], "products": match[1].split(),
-                      "text": source[start:match.end()].strip(),
-                      "start": start, "end": match.end()})
-    return found
-
-
-
-def select_hcf_block(reference_text, config):
-    reference_blocks = hcf_blocks(reference_text)
-    if not reference_blocks:
-        raise ValueError("No recognized HCF TARGET_PRODUCT copy block in reference bluetooth.mk")
-    configured = config.get("hcf_variant", "")
-    if configured:
-        candidates = [item for item in reference_blocks if item["variant"] == configured]
-    else:
-        model = config["model"].lower()
-        candidates = [item for item in reference_blocks if item["variant"].lower().startswith(model)]
-        if not candidates and len(reference_blocks) == 1:
-            candidates = reference_blocks
-    if len(candidates) != 1:
-        found = ", ".join(sorted(item["variant"] for item in reference_blocks))
-        raise ValueError(f"Cannot uniquely infer HCF model folder for {config['model']}; reference bluetooth.mk contains: {found}")
-    selected = candidates[0]
-    variant = selected["variant"]
-    config["hcf_variant"] = variant
-    if not config.get("products"):
-        config["products"] = list(selected["products"])
-    missing = {product for product in config["products"]
-               if not any(re.fullmatch(re.escape(pattern).replace("%", ".*"), product)
-                          for pattern in selected["products"])}
-    if missing:
-        raise ValueError("Selected HCF copy filter does not cover TARGET_PRODUCT: " + ", ".join(sorted(missing)))
-
-    return selected
+class RuleOutcome(Exception):
+    def __init__(self, status, message):
+        self.status, self.message = status, message
+        super().__init__(message)
 
 
 class Planner:
-    def __init__(self, p4, config, catalog=None):
+    def __init__(self, p4, config, catalog=None, *, blank=False):
         self.p4 = p4
         self.run_id = uuid.uuid4().hex[:8]
-        self.config = validate(config)
-        catalog_file = Path(__file__).resolve().parent.parent / "checklist" / "slsi.json"
-        self.catalog = catalog if catalog is not None else (json.loads(catalog_file.read_text(encoding="utf-8")) if catalog_file.exists() else default_catalog())
-        self.snapshots = {}
-        self.edits = {}
-        self.results = []
-        self.previews = []
-        self.rule_paths = []
+        self.catalog = (
+            validate_spec(catalog) if catalog is not None else load_spec(config=config)
+        )
+        self.config = validate(config, self.catalog)
+        self.input_config = json.loads(json.dumps(self.config))
+        self.blank = blank
+        self.snapshots, self.edits = {}, {}
+        self.results, self.previews, self.requirements, self.rule_paths = [], [], [], []
+        self.evidence = {}
+        self.values = Values(
+            self.catalog, self.config, read=self.optional_file, log=self.log
+        )
 
     def log(self, message):
         emit(self.p4, f"[run {self.run_id}] {message}")
 
-    def start_log(self, mode):
-        self.log(f"START {mode}: model={self.config['model']}; workspace={self.config['perforce']['client']}; "
-                 f"CSC features={self.config['check_csc_features']}")
-        if self.config.get("current_log_path"):
-            self.log(f"Reading optional current build log: {self.config['current_log_path']}")
-            self.config["current"]["build_log_inputs"] = read_build_log(self.config["current_log_path"], self.log)
-        for role in ("current", "reference"):
-            for scope in ("system", "vendor"):
-                self.log(f"Inputs: {role}.{scope} template={self.config[role][scope + '_template']}")
-
-    def reference_actions(self, rule, reference):
-        actions = augment_actions_from_reference(reference, rule["actions"])
-        for action in actions:
-            if action["type"] == "init_commands" and self.config["jdm"]:
-                action["commands"] = [command.replace("/mnt/vendor/efs", "/efs") for command in action["commands"]]
-                self.log(f"{rule['id']}: applied explicit JDM /efs selection to reference init commands.")
-            self.log(f"{rule['id']}: reference-selected {action['type']}: " +
-                     repr({key: value for key, value in action.items() if key in ('event', 'commands', 'packages', 'lines', 'keys')}))
-            for entry in action.get('conditional_packages', []):
-                conditions = ' -> '.join(code for guard in entry['guards'] for code, _ in guard['branches'])
-                self.log(f"{rule['id']}: selected conditional reference package(s) at line {entry['start'] + 1}: " +
-                         ', '.join(entry['packages']) + '; preserve condition(s): ' + conditions)
-        if not actions:
-            self.log(f"{rule['id']}: no matching reference actions; checklist defaults will not be inserted.")
-        return actions
-
     def presence_report(self, rule, path, *, review_notes=None):
         def report(notice):
-            self.log(f"{rule['id']}: file-wide presence check: {path}: {notice['message']}")
-            if notice['review']:
+            self.log(
+                f"{rule['id']}: file-wide presence check: {path}: {notice['message']}"
+            )
+            if notice["review"]:
                 if review_notes is not None:
-                    review_notes.append(notice['message'])
+                    review_notes.append(notice["message"])
                 else:
-                    self.result(rule, 'review', notice['message'], [path])
+                    self.result(rule, "review", notice["message"], [path])
+
         return report
 
     def preview(self, rule, target_path, content, *, reference_path=None, note=""):
         """Record inspection-only content; it is never passed to the executor."""
         raw_content = content if isinstance(content, bytes) else content.encode("utf-8")
         reference_snapshot = self.snapshots.get(reference_path, {})
-        file_type = reference_snapshot.get("type", "text") if isinstance(content, bytes) else "text"
+        file_type = (
+            reference_snapshot.get("type", "text")
+            if isinstance(content, bytes)
+            else "text"
+        )
         if isinstance(content, bytes):
             try:
                 content, _ = decode(content)
             except UnicodeDecodeError:
-                content = f"<binary content: {len(content)} bytes; SHA-256 {digest(content)}>"
-        self.previews.append({"rule": rule["id"], "title": rule["title"],
-                              "source": rule["source"], "target_path": target_path,
-                              "reference_path": reference_path, "note": note,
-                              "content": content, "content_base64": base64.b64encode(raw_content).decode("ascii"),
-                              "file_type": file_type})
+                content = (
+                    f"<binary content: {len(content)} bytes; SHA-256 {digest(content)}>"
+                )
+        self.previews.append(
+            {
+                "rule": rule["id"],
+                "title": rule["title"],
+                "source": rule["source"],
+                "target_path": target_path,
+                "reference_path": reference_path,
+                "note": note,
+                "content": content,
+                "content_base64": base64.b64encode(raw_content).decode("ascii"),
+                "file_type": file_type,
+            }
+        )
 
     def result(self, rule, status, message, paths=None):
         self.log(f"[{status.upper()}] {rule['id']}: {message}")
         for path in paths or []:
             self.log(f"{rule['id']} evidence path: {path}")
-        self.results.append({"rule": rule["id"], "title": rule["title"], "source": rule["source"],
-                             "status": status, "message": message, "paths": paths or []})
+        self.results.append(
+            {
+                "rule": rule["id"],
+                "title": rule["title"],
+                "source": rule["source"],
+                "status": status,
+                "message": message,
+                "paths": paths or [],
+                "evidence": [
+                    self.evidence[p] for p in paths or [] if p in self.evidence
+                ],
+            }
+        )
 
     def snapshot(self, path, *, optional=False):
         if path in self.snapshots:
-            self.log(f"Content cache reused: {path}#{self.snapshots[path]['revision']}; no new p4 print needed.")
+            self.log(
+                f"Content cache reused: {path}#{self.snapshots[path]['revision']}; no new p4 print needed."
+            )
             return self.snapshots[path]
         files = self.p4.files(path)
         if not files:
             if not optional:
                 raise ValueError(f"Required file is absent: {path}")
-            snapshot = {"path": path, "revision": None, "type": "text", "sha256": None, "content": ""}
+            snapshot = {
+                "path": path,
+                "revision": None,
+                "type": "text",
+                "sha256": None,
+                "content": "",
+            }
         else:
             if len(files) != 1:
                 raise ValueError(f"Expected a single file: {path}")
             rev = int(files[0]["rev"])
             content = self.p4.read_file(path, rev)
-            snapshot = {"path": path, "revision": rev, "type": files[0].get("type", "text"),
-                        "sha256": digest(content), "content": base64.b64encode(content).decode("ascii")}
-        self.log(f"Snapshot recorded: {path}#{snapshot['revision']}; type={snapshot['type']}; SHA-256={snapshot['sha256']}")
+            snapshot = {
+                "path": path,
+                "revision": rev,
+                "type": files[0].get("type", "text"),
+                "sha256": digest(content),
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        self.log(
+            f"Snapshot recorded: {path}#{snapshot['revision']}; type={snapshot['type']}; SHA-256={snapshot['sha256']}"
+        )
         self.snapshots[path] = snapshot
         return snapshot
 
@@ -254,14 +199,26 @@ class Planner:
         before = self.snapshot(path, optional=True)
         original = base64.b64decode(before["content"])
         if content == original and before["revision"] is not None:
-            self.log(f"{rule['id']}: no content changes needed: {path}#{before['revision']}")
+            self.edits.pop(path, None)
+            self.log(
+                f"{rule['id']}: no content changes needed: {path}#{before['revision']}"
+            )
             return False
         if path not in self.edits:
-            self.log(f"{rule['id']}: resolving local edit destination in workspace {self.config['perforce']['client']}: {path}")
+            self.log(
+                f"{rule['id']}: resolving local edit destination in workspace {self.config['perforce']['client']}: {path}"
+            )
             local = self.p4.where(path)
-            self.edits[path] = {"path": path, "local_path": local, "revision": before["revision"],
-                                "before_sha256": before["sha256"], "before": before["content"],
-                                "type": file_type or before["type"], "rules": [], "sources": []}
+            self.edits[path] = {
+                "path": path,
+                "local_path": local,
+                "revision": before["revision"],
+                "before_sha256": before["sha256"],
+                "before": before["content"],
+                "type": file_type or before["type"],
+                "rules": [],
+                "sources": [],
+            }
         edit = self.edits[path]
         edit["after"] = base64.b64encode(content).decode("ascii")
         edit["after_sha256"] = digest(content)
@@ -271,428 +228,903 @@ class Planner:
         try:
             old, _ = decode(original)
             new, _ = decode(content)
-            edit["diff"] = "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True),
-                                                       fromfile=path + (f"#{before['revision']}" if before["revision"] else " (absent)"),
-                                                       tofile=path + " (proposed)"))
+            edit["diff"] = "".join(
+                difflib.unified_diff(
+                    old.splitlines(True),
+                    new.splitlines(True),
+                    fromfile=path
+                    + (f"#{before['revision']}" if before["revision"] else " (absent)"),
+                    tofile=path + " (proposed)",
+                )
+            )
         except UnicodeDecodeError:
-            edit["diff"] = f"Binary copy: {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}"
-        self.log(f"{rule['id']}: proposed edit recorded for {path}; {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}")
+            edit["diff"] = (
+                f"Binary copy: {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}"
+            )
+        self.log(
+            f"{rule['id']}: proposed edit recorded for {path}; {len(original)} -> {len(content)} bytes; SHA-256 {digest(content)}"
+        )
         return True
 
-    def context(self):
-        path_rules = json.loads(json.dumps(self.catalog.get("path_rules", {})))
-        legacy_headers = self.catalog.get("model_common_files", {}).get("bluetooth_header", [])
-        if legacy_headers:
-            path_rules.setdefault("system", {})["bluetooth_header"] = [
-                {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/" + item}
-                for item in legacy_headers]
-        self.resolver = Resolver(self.p4, self.config, path_rules)
-        # Explicit input may choose the new chip, but must not silently turn a
-        # non-SLSI reference into an SLSI project.
-        def board_values(scope):
-            try:
-                path = self.resolver.discover("reference", scope, "board_config")
-            except DiscoveryMiss as exc:
-                self.log(f"Optional setup board unavailable: {exc}")
-                return {}
-            return make_values(decode(self.content(path))[0], "WLAN_")
+    def optional_file(self, file_id):
+        try:
+            path = self.resolver.locate(file_id, optional=True)
+        except DiscoveryMiss:
+            return None
+        return decode(self.content(path))[0] if path else None
 
-        reference_values = board_values("system")
-        vendor = reference_values.get("WLAN_VENDOR", "").strip('"')
-        if vendor and vendor != "8":
-            raise ValueError("Reference WLAN_VENDOR is not SLSI (8)")
-        if not self.config.get("chipset"):
-            values = reference_values if reference_values.get("WLAN_CHIP") else board_values("vendor")
-            vendor = values.get("WLAN_VENDOR", "").strip('"')
-            if vendor and vendor != "8":
-                raise ValueError("Reference WLAN_VENDOR is not SLSI (8)")
-            chip = values.get("WLAN_CHIP", "").strip('"').lower() or role_settings(self.config, "current").get("chipset", "")
-            if not re.fullmatch(r"[a-z0-9_]+", chip):
-                raise ValueError("No usable reference WLAN_CHIP was found; enter chipset explicitly to resolve chipset-specific files. No default chipset is imposed.")
-            self.config["chipset"] = chip
-        chip = self.config["chipset"].lower()
-        self.config["chipset"] = chip
-        family = self.catalog["chipsets"].get(chip)
-        if not family:
-            raise ValueError(f"Chipset {chip} is not in SLSI!C34. Add a verified chipset mapping to the catalog.")
-        self.config["firmware"] = family
-        if not self.config.get("ap"):
-            if chip == "s5e8835":
-                self.config["ap"] = "erd8835"  # Explicitly linked in SLSI!C30.
-            else:
-                for scope in ("vendor", "system"):
-                    try:
-                        path = self.resolver.discover("reference", scope, "board_config")
-                    except DiscoveryMiss as exc:
-                        self.log(f"AP inference skipped optional board: {exc}")
-                        continue
-                    text, _ = decode(self.content(path))
-                    aps = set(re.findall(r"^\s*(?:-?include)\s+device/samsung/([^/\s]+)/BoardConfig[^\s]*", text, re.M))
-                    aps.discard(self.config["common_device"])
-                    if len(aps) == 1:
-                        self.config["ap"] = aps.pop()
-                        break
-        current = role_settings(self.config, "current")
-        current_chip = current["chipset"].lower()
-        current_family = self.catalog["chipsets"].get(current_chip)
-        if not current_family:
-            raise ValueError(f"Current chipset {current_chip} is not in SLSI!C34. Add a verified chipset mapping to the catalog.")
-        if self.config["current"].get("build_log_inputs"):
-            self.config["current"]["build_log_inputs"]["firmware"] = current_family
-            self.log(f"Current inputs after build log: model={current['model']}; chipset={current_chip}; AP={current.get('ap') or 'unresolved'}; firmware family={current_family}.")
-        self.variables = {"chipset": current_chip, "firmware": current_family,
-                          "efs": "/efs" if self.config["jdm"] else "/mnt/vendor/efs"}
-        ref_chip = reference_values.get("WLAN_CHIP", "").strip('"').lower()
-        self.log(f"Resolved model inputs: chipset={chip}; AP={self.config.get('ap') or 'unresolved'}; firmware family={family}; HCF variant={self.config.get('hcf_variant') or 'infer from reference'}")
-        if ref_chip and ref_chip != current_chip:
-            self.result({"id": "chip.review", "title": "Chipset differs from reference", "source": "SLSI!C6"},
-                        "review", f"Current chipset {current_chip}; reference chipset {ref_chip}. Confirm this hardware change.")
+    def _file(self, file_id, *, optional=False, absent=False):
+        virtual = (
+            set(self.edits).intersection(self.resolver.candidates(file_id))
+            if self.edits and self.catalog["files"][file_id]["kind"] == "file"
+            else set()
+        )
+        if virtual:
+            live = self.resolver.locate(file_id, optional=True)
+            choices = virtual | ({live} if live else set())
+            if len(choices) != 1:
+                raise MappingError("Multiple live/proposed files match " + file_id)
+            path = choices.pop()
+        else:
+            path = self.resolver.locate(file_id, optional=optional, allow_absent=absent)
+        paths = (
+            [r["depotFile"] for r in path]
+            if isinstance(path, list)
+            else ([path] if path else [])
+        )
+        source_id = self.catalog["files"][file_id]["source"]
+        role = self.catalog["sources"][source_id].get("role", "current")
+        for name in paths:
+            self.rule_paths.append(name)
+            self.evidence[name] = {
+                "path": name,
+                "file": file_id,
+                "source": source_id,
+                "role": role,
+            }
+        return path
+
+    def _message(self, value):
+        return (
+            str(self.values.eval(value))
+            if isinstance(value, dict)
+            else self.values.template(value)
+        )
+
+    def _missing(self, step, key, message, default="review"):
+        policy = step.get("policy", {}).get(key, default)
+        raise RuleOutcome(
+            {"skip": "skipped", "block": "blocked"}.get(policy, policy), message
+        )
+
+    def context(self):
+        for key, source in self.catalog["sources"].items():
+            if source.get("input"):
+                self.log(
+                    f"Inputs: {key} template={get_value(self.config, source['input'])}"
+                )
+        self.resolver = Resolver(self.p4, self.config, self.catalog, values=self.values)
+        for name, item in self.catalog["derive"].items():
+            try:
+                value = self.values.variable(name)
+                if value is not None:
+                    self.log(f"Resolved {name}={value}")
+            except (Unresolved, ValueError) as exc:
+                self.log(f"Derivation {name} unresolved: {exc}")
+                if item.get("required"):
+                    raise
+        for item in self.catalog.get("preconditions", []):
+            if not self.values.condition(item["condition"]):
+                raise ValueError(self._message(item["message"]))
 
     def build(self):
-        self.start_log("normal plan")
-        identity = self.p4.identity()
-        workspace = self.p4.workspace_spec()
-        plan = {"schema_version": 1, "mode": "live", "created_at": datetime.now(timezone.utc).isoformat(),
-                "catalog_sha256": digest(canonical(self.catalog)), "source": self.catalog["source"],
-                "connection": self.config["perforce"], "identity": identity, "workspace": workspace}
+        self.log(
+            f"START {'empty-file preview' if self.blank else 'normal plan'}: rules={self.catalog['id']}; workspace={self.config['perforce']['client']}"
+        )
+        plan = {
+            "schema_version": 1,
+            "mode": "comparison" if self.blank else "live",
+            "run_id": self.run_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "catalog_sha256": digest(canonical(self.catalog)),
+            "source": self.catalog.get("source", self.catalog["title"]),
+            "rules_id": self.catalog["id"],
+            "rules_schema_version": 2,
+            "input_config": self.input_config,
+            "title": self.catalog.get("report", {}).get("title", self.catalog["title"]),
+            "connection": self.config["perforce"],
+            "identity": self.p4.identity(),
+            "workspace": self.p4.workspace_spec(),
+        }
+        completed = {}
         try:
             self.context()
         except Exception as exc:
-            self.result({"id": "setup", "title": "Resolve project inputs", "source": "Inputs / SLSI!C6,C34"}, "blocked", str(exc))
-            plan.update(config=self.config, templates=getattr(self, "resolver", None).specs if hasattr(self, "resolver") else {},
-                        checks=self.results, snapshots=list(self.snapshots.values()), changes=[], previews=self.previews)
-            return seal(plan)
-        for source_rule in self.catalog["rules"]:
-            rule = substitute(source_rule, self.variables)
-            self.rule_paths = []
-            # A failed rule must not leave a partial edit in the plan.
-            saved_edits = json.loads(json.dumps(self.edits))
-            results_start, previews_start = len(self.results), len(self.previews)
-            self.log(f"RULE START {rule['id']}: {rule['title']}; scope={rule['scope']}; target={rule['target']}")
-            try:
-                self.apply_rule(rule)
-            except Exception as exc:
-                self.edits = saved_edits
-                del self.results[results_start:]
-                del self.previews[previews_start:]
-                status = ("skipped" if exc.role == "reference" else "review") if isinstance(exc, DiscoveryMiss) else "blocked"
-                self.result(rule, status, str(exc), self.rule_paths + (exc.paths if isinstance(exc, DiscoveryMiss) else []))
-                if isinstance(exc, PerforceTimeout):
-                    self.result({"id": "planning.stopped", "title": "Planning stopped", "source": "Perforce connection"},
-                                "blocked", "Remaining rules were not run after the request timeout. Fix the reported request and generate a fresh plan.")
-                    break
-        self.result({"id": "sheet.review", "title": "Review checklist interpretation", "source": "SLSI!B13,B24,B28,C10"},
-                    "review", "Checklist settings and command values are selection hints; only matching reference content is used. "
-                    "B28 selects the reference post-fs-data event. Explicit JDM selection maps EFS paths to /efs. Product features follow the reference OS; "
-                    "review model and regional eligibility against the Feature Flags tab before approving. "
-                    "Sample TRUE/FALSE feature values are not forced across models.")
-        plan.update(config=self.config, templates=self.resolver.specs, checks=self.results,
-                    snapshots=list(self.snapshots.values()), changes=list(self.edits.values()), previews=self.previews)
-        self.log(f"END normal plan: {len(self.results)} results; {len(self.edits)} proposed file edits; {len(self.previews)} previews.")
-        return seal(plan)
-
-    def apply_rule(self, rule):
-        kind, scope, target = rule["kind"], rule["scope"], rule["target"]
-        if kind == "manual":
-            self.result(rule, "manual", rule["notes"])
-            return
-        if kind == "carrier_features":
-            if not self.config["check_csc_features"]:
-                self.result(rule, "skipped", "CSC feature checks are disabled. Select Check CSC features to include them.")
-                return
-            return self.carrier_features(rule)
-        if kind in ("copy_if_reference", "copy_tree_if_reference"):
-            source = self.resolver.discover("reference", scope, target, optional=True)
-            if not source:
-                self.result(rule, "skipped", "Absent in reference; conditional copy does not apply.")
-                return
-            sources = [r["depotFile"] for r in source] if isinstance(source, list) else [source]
-            for src in sources:
-                dst = self.resolver.counterpart(src, scope)
-                self.rule_paths.append(dst)
-                source_snapshot = self.snapshot(src)
-                target_snapshot = self.snapshot(dst, optional=True)
-                content = base64.b64decode(source_snapshot["content"])
-                self.preview(rule, dst, content, reference_path=src,
-                             note="Complete reference file that would be copied if the current target were absent.")
-                if target_snapshot["revision"] is not None:
-                    identical = source_snapshot["sha256"] == target_snapshot["sha256"]
-                    self.result(rule, "pass" if identical else "review",
-                                (f"Current and reference files are byte-for-byte identical (SHA-256 {source_snapshot['sha256']}); no change planned."
-                                 if identical else
-                                 "Current file differs from reference. This conditional-copy rule will not overwrite an existing file; review both files manually."),
-                                [src, dst])
-                else:
-                    self.propose(dst, content, rule, file_type=source_snapshot["type"])
-                    self.result(rule, "change", "Copy missing reference file.", [src, dst])
-            return
-        if kind == "verify_hcf":
-            return self.verify_hcf(rule)
-        if kind == "verify_hals":
-            return self.verify_reference_hals(rule)
-        if kind == "verify_firmware":
-            return self.verify_firmware(rule)
-        src = self.resolver.discover("reference", scope, target)
-        self.rule_paths = [src]
-        source_snapshot = self.snapshot(src)
-        reference, _ = decode(base64.b64decode(source_snapshot["content"]))
-        self.log(f"{rule['id']}: reference source={src}; revision={self.snapshots[src]['revision']}")
-        path = self.resolver.discover("current", scope, target)
-        self.rule_paths.append(path)
-        self.log(f"{rule['id']}: current target={path}")
-        text, encoding = decode(self.content(path))
-        if kind == "reference_make_settings":
-            snapshot = source_snapshot
-            if "WLAN_CHIP" in rule["keys"]:
-                reference_chip = make_values(reference, "WLAN_").get("WLAN_CHIP", "").strip('"').lower()
-                if reference_chip and reference_chip != role_settings(self.config, "current")["chipset"]:
-                    raise ValueError("Selected chipset differs from reference WLAN_CHIP; align the input before copying reference board settings")
-            empty_preview = copy_make_settings("", reference, rule["keys"], rule.get("include_basenames", []),
-                                               rule.get("key_patterns", []),
-                                               report=lambda message: self.log(f"{rule['id']}: empty-file preview: " + message.replace("current file", "empty preview")))
-            if not empty_preview:
-                self.result(rule, "skipped", "Reference contains no selected board settings or includes; current content is preserved.", [src, path])
-                return
-            self.preview(rule, path, empty_preview, reference_path=src,
-                         note="Selected reference statements that would be placed into an empty target file.")
-            after = copy_make_settings(text, reference, rule["keys"], rule.get("include_basenames", []),
-                                       rule.get("key_patterns", []),
-                                       report=lambda message: self.log(f"{rule['id']}: current file: {message}"))
-            changed = self.propose(path, after.encode(encoding), rule)
-            self.result(rule, "change" if changed else "pass",
-                        (f"Selected statements differ; proposed values, operators and include path come from reference #{snapshot['revision']}."
-                         if changed else
-                         f"Selected Bluetooth/WLAN statements and include already match reference #{snapshot['revision']}; no change planned. Other file content was not required to match."),
-                        [src, path])
-            return
-        if kind == "reference_features":
-            selected = name_selector(rule["prefix"], rule.get("key_patterns", []))
-            if rule["format"] == "make":
-                values = make_values(reference, rule["prefix"], rule.get("key_patterns", []))
-                current = make_values(text, rule["prefix"], rule.get("key_patterns", []))
-                after = transform(text, {"type": "assignments", "values": values, "operator": "="},
-                                  report=self.presence_report(rule, path)) if values else text
-                empty_preview = transform("", {"type": "assignments", "values": values, "operator": "="}) if values else ""
-            else:
-                root = ET.fromstring(reference)
-                elements = [e for e in root.iter() if selected(e.tag)]
-                values = {e.tag: e.text or "" for e in elements}
-                if len(values) != len(elements) or any(len(e) for e in elements):
-                    raise ValueError("Duplicate/non-leaf reference feature XML elements")
-                current_root = ET.fromstring(text)
-                current = {e.tag: e.text for e in current_root.iter() if selected(e.tag)}
-                after = transform(text, {"type": "xml_elements", "elements": values, "parent": current_root.tag},
-                                  report=self.presence_report(rule, path)) if values else text
-                empty_preview = transform(f"<{current_root.tag}></{current_root.tag}>\n",
-                                          {"type": "xml_elements", "elements": values, "parent": current_root.tag}) if values else ""
-            if not values:
-                self.result(rule, "review", "Reference has no matching Bluetooth feature values; inspect feature selection.", [src, path])
-                return
-            self.preview(rule, path, empty_preview, reference_path=src,
-                         note="Reference Bluetooth feature values that would be used for an empty target.")
-            changed = self.propose(path, after.encode(encoding), rule)
-            extras = sorted(set(current) - set(values))
-            self.result(rule, "change" if changed else "pass", f"Compared {len(values)} reference Bluetooth flags.", [src, path])
-            if extras:
-                self.result(rule, "review", "Current-only flags preserved for review: " + ", ".join(extras), [path])
-            return
-        if kind != "transform":
-            raise ValueError(f"Unknown rule kind: {kind}")
-        actions = self.reference_actions(rule, reference)
-        after, empty_preview = text, ""
-        presence_start = len(self.results)
-        review_notes = [] if rule['id'] == 'vendor.postfs' else None
-        for action in actions:
-            after = apply_reference_action(after, action, report=self.presence_report(rule, path, review_notes=review_notes))
-            empty_preview = apply_reference_action(empty_preview, action)
-        if not empty_preview:
-            self.result(rule, "skipped", "Reference has no matching statements for this rule. Checklist examples are optional; nothing is inserted.", [src, path])
-            return
-        self.preview(rule, path, empty_preview, reference_path=src,
-                     note="Bluetooth content selected from the reference; checklist examples only guide selection.")
-        changed = self.propose(path, after.encode(encoding), rule)
-        review_presence = bool(review_notes) or any(item['status'] == 'review' for item in self.results[presence_start:])
-        status = 'review' if review_notes else ('change' if changed else ('review' if review_presence else 'pass'))
-        message = ("Reference-selected edit proposed; existing entries were checked across the current file." if changed else
-                   "No edit proposed; existing content at other locations needs review." if review_presence else
-                   "Already matches selected reference content.")
-        if review_notes:
-            message += '\n' + '\n'.join(dict.fromkeys(review_notes))
-        self.result(rule, status, message, [src, path])
-
-    def verify_reference_hals(self, rule):
-        reference_path = self.resolver.discover("reference", "vendor", "manifest")
-        self.rule_paths = [reference_path]
-        reference_root = ET.fromstring(decode(self.content(reference_path))[0])
-        selected_name = name_selector("", rule.get("name_patterns", []))
-        hints = {hal["name"] for hal in rule.get("expected_hals", [])}
-        reference_hals = [hal for hal in reference_root.findall(".//hal")
-                          if selected_name(hal.findtext("name") or "") or hal.findtext("name") in hints]
-        found_names = {hal.findtext("name") for hal in reference_hals}
-        for name in sorted(hints - found_names):
-            self.log(f"{rule['id']}: checklist HAL {name} is absent in reference; no entry/version is required for it.")
-        if not reference_hals:
-            self.result(rule, "skipped", "Reference manifest contains no selected Bluetooth HIDL/AIDL entries; checklist HAL examples are not mandatory.", [reference_path])
-            return
-        path = self.resolver.discover("current", "vendor", "manifest")
-        self.rule_paths.append(path)
-        root = ET.fromstring(decode(self.content(path))[0])
-        details = []
-        needs_review = False
-        for reference_hal in reference_hals:
-            name = reference_hal.findtext("name")
-            reference_matches = [hal for hal in reference_hals if hal.findtext("name") == name]
-            matches = [hal for hal in root.findall(".//hal") if hal.findtext("name") == name]
-            if len(reference_matches) != 1 or len(matches) > 1:
-                raise ValueError(f"Ambiguous Bluetooth HAL {name}: reference count={len(reference_matches)}, current count={len(matches)}; cannot choose an entry.")
-            if not matches:
-                needs_review = True
-                details.append(f"REVIEW: Reference HAL {name} ({reference_hal.get('format')}) is absent in current manifest. Verification only; no XML was inserted.")
-                continue
-            current = matches[0]
-            def pairs(hal):
-                return {(i.findtext("name"), instance.text) for i in hal.findall("interface") for instance in i.findall("instance")}
-            versions = [v.text.strip() for v in reference_hal.findall("version") if v.text]
-            actual = [v.text.strip() for v in current.findall("version") if v.text]
-            differences = []
-            if reference_hal.get("format") != current.get("format"):
-                differences.append(f"format: reference={reference_hal.get('format')}, current={current.get('format')}")
-            if reference_hal.findtext("transport") != current.findtext("transport"):
-                differences.append(f"transport: reference={reference_hal.findtext('transport')}, current={current.findtext('transport')}")
-            if any(not any(hidl_version_at_least(value, minimum) for value in actual) for minimum in versions):
-                differences.append(f"versions: reference minimums={versions}, current={actual}")
-            if not pairs(reference_hal).issubset(pairs(current)):
-                differences.append(f"interfaces/instances missing from current: {sorted(pairs(reference_hal) - pairs(current))}")
-            expected_fq = {(item.text or "").strip() for item in reference_hal.findall("fqname")}
-            current_fq = {(item.text or "").strip() for item in current.findall("fqname")}
-            if not expected_fq.issubset(current_fq):
-                differences.append(f"reference fqname entries missing from current: {sorted(expected_fq - current_fq)}")
-            needs_review |= bool(differences)
-            details.append(("REVIEW: " if differences else "PASS: ") +
-                           f"Reference {reference_hal.get('format', 'unspecified')} HAL {name}: " +
-                           ("; ".join(differences) if differences else "format, transport, interfaces, fqnames and reference minimum versions match."))
-        self.result(rule, "review" if needs_review else "pass", "\n".join(details), [reference_path, path])
-
-    def verify_firmware(self, rule):
-        current = role_settings(self.config, "current")
-        family = current["firmware"]
-        path = self.resolver.discover("current", "vendor", "firmware")
-        self.rule_paths = [path]
-        matches = f"/firmware/{family}/" in path
-        self.result(rule, "pass" if matches else "review",
-                    (f"Mapped current firmware path exists for {current['chipset']} → {family}."
-                     if matches else f"Current firmware path does not contain the mapped family /firmware/{family}/."),
-                    [path])
-
-    def reference_hcf(self, rule):
-        reference_mk = self.resolver.discover("reference", "vendor", "hcf_makefile")
-        self.rule_paths = [reference_mk]
-        reference_text, _ = decode(self.content(reference_mk))
-        if not hcf_blocks(reference_text):
-            self.result(rule, "skipped", "Reference bluetooth.mk has no recognized HCF TARGET_PRODUCT copy block. "
-                        "No default folder/filter is imposed. Check whether this reference uses HCF or a different Make syntax.", [reference_mk])
-            return None
-        selected = select_hcf_block(reference_text, self.config)
-        self.log(f"{rule['id']}: reference HCF selection: folder={selected['variant']}; TARGET_PRODUCT={selected['products']}")
-        records = self.resolver.discover("reference", "vendor", "hcf")
-        hcf = [record['depotFile'] for record in records if record['depotFile'].lower().endswith('.hcf')]
-        if not hcf:
-            self.result(rule, "skipped", "Couldn't find .hcf files in the reference folder selected by bluetooth.mk. "
-                        "Searched: " + "; ".join(self.resolver.attempts.get("reference.vendor.hcf", [])) +
-                        ". Discovered other files: " + ", ".join(record['depotFile'] for record in records), [reference_mk])
-            return None
-        for path in hcf:
-            self.snapshot(path)
-        self.rule_paths.extend(hcf)
-        return reference_mk, selected
-
-    def verify_hcf(self, rule):
-        source = self.reference_hcf(rule)
-        if source is None:
-            return
-        reference_mk, selected = source
-        current_mk = self.resolver.discover("current", "vendor", "hcf_makefile")
-        self.rule_paths.append(current_mk)
-        current_text, current_encoding = decode(self.content(current_mk))
-
-        variant = selected["variant"]
-
-        current_candidates = [item for item in hcf_blocks(current_text) if item["variant"] == variant]
-        if len(current_candidates) > 1:
-            raise ValueError(f"Current bluetooth.mk has duplicate HCF filter blocks for {variant}")
-        nl = "\r\n" if "\r\n" in current_text else "\n"
-        reference_block = selected["text"].replace("\r\n", "\n").replace("\n", nl)
-        if current_candidates:
-            current_block = current_candidates[0]
-            needs_filter_update = current_block["products"] != selected["products"]
-            updated_mk = (current_text[:current_block["start"]] + reference_block +
-                          current_text[current_block["end"]:]) if needs_filter_update else current_text
+            self.result(
+                {"id": "setup", "title": "Resolve project inputs", "source": "Inputs"},
+                "blocked",
+                str(exc),
+            )
         else:
-            if f"$(HCF_PATH)/{variant}" in current_text:
-                raise ValueError(f"Current bluetooth.mk mentions {variant} in an unrecognized block; review manually")
-            separator = "" if not current_text else ("" if current_text.endswith(("\n", "\r")) else nl) + nl
-            updated_mk = current_text + separator + reference_block + nl
-        records = self.resolver.discover("current", "vendor", "hcf")
-        hcf = [r["depotFile"] for r in records if r["depotFile"].lower().endswith(".hcf")]
-        if not hcf:
-            self.result(rule, "review", "Couldn't find .hcf files in the current selected folder. Searched: " + "; ".join(self.resolver.attempts.get("current.vendor.hcf", [])) + ". Other files found: " + ", ".join(r["depotFile"] for r in records), [current_mk])
-            return
-        for path in hcf:
-            self.snapshot(path)
-        filter_changed = self.propose(current_mk, updated_mk.encode(current_encoding), rule)
-        evidence = ("Resolved HCF folder: " + variant +
-                    "; TARGET_PRODUCT values: " + " ".join(selected["products"]) +
-                    ". Verified HCF files: " + ", ".join(hcf))
-        self.preview(rule, current_mk, selected["text"] + "\n", reference_path=reference_mk,
-                     note="Reference bluetooth.mk filter block that current must contain. " + evidence)
-        self.result(rule, "change" if filter_changed else "pass",
-                    ("Reference HCF filter block will be added/updated. " if filter_changed else "Reference HCF filter block already matches. ") +
-                    f"Folder {variant} contains {len(hcf)} .hcf file(s); products: " +
-                    ", ".join(self.config["products"]), [reference_mk, current_mk, *hcf])
+            pending = list(self.catalog["rules"])
+            while pending:
+                ready = next(
+                    (
+                        r
+                        for r in pending
+                        if all(d in completed for d in r.get("depends_on", []))
+                    ),
+                    None,
+                )
+                if ready is None:
+                    raise ValueError("Unresolved rule dependencies")
+                pending.remove(ready)
+                rule = dict(ready, source=rule_source(ready))
+                self.rule_paths = []
+                previous = json.loads(json.dumps(self.edits))
+                npreviews, nrequirements, nresults = (
+                    len(self.previews),
+                    len(self.requirements),
+                    len(self.results),
+                )
+                self.log(f"RULE START {rule['id']}: {rule['title']}")
+                try:
+                    if any(
+                        completed[d] not in ("pass", "change")
+                        for d in rule.get("depends_on", [])
+                    ):
+                        raise RuleOutcome(
+                            "review",
+                            "A prerequisite rule is unresolved; no edits proposed.",
+                        )
+                    if not self.values.condition(rule.get("when", True)):
+                        raise RuleOutcome(
+                            "skipped",
+                            rule.get("disabled_message", "Rule condition is disabled."),
+                        )
+                    statuses, messages = [], []
+                    for step in rule["steps"]:
+                        if not self.values.condition(step.get("when", True)):
+                            continue
+                        try:
+                            status, message = self.execute_step(rule, step)
+                        except RuleOutcome as exc:
+                            if exc.status != "skipped":
+                                raise
+                            status, message = exc.status, exc.message
+                        if step["op"] != "assert" or len(rule["steps"]) == 1:
+                            statuses.append(status)
+                        messages.append(message)
+                    status = next(
+                        (
+                            s
+                            for s in (
+                                "blocked",
+                                "review",
+                                "change",
+                                "pass",
+                                "manual",
+                                "skipped",
+                            )
+                            if s in statuses
+                        ),
+                        "skipped",
+                    )
+                    self.result(
+                        rule,
+                        status,
+                        "\n".join(dict.fromkeys(messages)) or "No applicable steps.",
+                        list(dict.fromkeys(self.rule_paths)),
+                    )
+                except Exception as exc:
+                    self.edits = previous
+                    del self.previews[npreviews:]
+                    del self.requirements[nrequirements:]
+                    del self.results[nresults:]
+                    if isinstance(exc, RuleOutcome):
+                        status, message = exc.status, exc.message
+                    elif isinstance(exc, (Unresolved, DiscoveryMiss)):
+                        status, message = "review", str(exc)
+                    else:
+                        status, message = "blocked", str(exc)
+                    self.result(
+                        rule,
+                        status,
+                        message,
+                        list(
+                            dict.fromkeys(
+                                self.rule_paths
+                                + (exc.paths if isinstance(exc, DiscoveryMiss) else [])
+                            )
+                        ),
+                    )
+                    if isinstance(exc, PerforceTimeout):
+                        self.result(
+                            {
+                                "id": "planning.stopped",
+                                "title": "Planning stopped",
+                                "source": "Perforce",
+                            },
+                            "blocked",
+                            "Remaining rules were not run after a timeout.",
+                        )
+                        break
+                completed[rule["id"]] = status
+        exclusions = []
+        for item in self.catalog.get("comparison", {}).get("exclude", []):
+            if self.values.condition(item.get("when", True)):
+                exclusions.append({k: v for k, v in item.items() if k != "when"})
+        try:
+            description = self.values.template(
+                self.catalog.get("report", {}).get("changelist", self.catalog["title"])
+            )
+        except Unresolved:
+            description = self.catalog["title"]
+        plan.update(
+            config=self.config,
+            templates=(
+                getattr(self, "resolver", None).specs
+                if hasattr(self, "resolver")
+                else {}
+            ),
+            source_roles={
+                k: v.get("role", "current") for k, v in self.catalog["sources"].items()
+            },
+            source_roots=(
+                getattr(self, "resolver", None).roots
+                if hasattr(self, "resolver")
+                else {}
+            ),
+            checks=self.results,
+            snapshots=list(self.snapshots.values()),
+            changes=list(self.edits.values()),
+            previews=self.previews,
+            requirements=self.requirements,
+            comparison_exclusions=exclusions,
+            changelist_description=description,
+            variables=self.values.cache,
+        )
+        plan = seal(plan)
+        if self.blank:
+            from .blank import plan_from_previews
 
-    def report_carrier_discovery(self, rule, discovery):
-        if not discovery["matched_files"]:
-            self.result(rule, "review", "Reference CSC discovery: " + missing_carrier_message(discovery))
-        for region in discovery["skipped_regions"]:
-            files = region["files"]
-            self.result(rule, "skipped", f"No {CARRIER_FILENAME} anywhere under this reference region "
-                        "after searching its entire subtree, including system/; left untouched. "
-                        "Files found: " + ", ".join(f"{file['filename']} ({file['type']})" for file in files),
-                        [region["path"], *[file["path"] for file in files]])
+            plan = plan_from_previews(plan)
+        self.log(
+            f"END {'empty-file preview' if self.blank else 'normal plan'}: {len(self.results)} checks; {len(plan['changes'])} file(s)."
+        )
+        return plan
 
-    def carrier_features(self, rule):
-        current_root = model_root(self.config["current"]["csc_path"], role_settings(self.config, "current")["model"])
-        reference_root = model_root(self.config["reference"]["csc_path"], self.config["model"])
-        current = carrier_files(self.p4, current_root)
-        discovery = {}
-        reference = carrier_files(self.p4, reference_root, details=discovery)
-        self.report_carrier_discovery(rule, discovery)
-        for relative, src in reference.items():
-            dst = current_root + "/" + relative
-            self.rule_paths.append(dst)
-            source = self.snapshot(src)
-            before = self.snapshot(dst, optional=True)
-            content = base64.b64decode(source["content"])
-            reference_json = carrier_json(decode(content)[0])
-            self.preview(rule, dst, content, reference_path=src,
-                         note="Reference keys for a blank JSON file; existing target values are preserved during normal planning.")
-            if before["revision"] is None:
-                changed = self.propose(dst, content, rule, file_type=source["type"])
-                message = "Add missing carrier JSON at the same model-relative path: " + relative
+    def requirement(
+        self,
+        rule,
+        file_id,
+        path,
+        *,
+        preview="",
+        reference=None,
+        desired="present",
+        selector=None,
+        step=None,
+    ):
+        file = self.catalog["files"][file_id]
+        item = {
+            "rule": rule["id"],
+            "target_path": path,
+            "file_id": file_id,
+            "format": file["format"],
+            "desired": desired,
+            "comparison": file.get("comparison", {}),
+            "source": rule["source"],
+            "reference_path": reference,
+            "preview": preview if isinstance(preview, str) else None,
+        }
+        if selector is not None:
+            item["selector"] = selector
+        if step is not None:
+            item["step"] = step
+        self.requirements.append(item)
+        self.preview(
+            rule,
+            path,
+            preview,
+            reference_path=reference,
+            note=(
+                "Required absence: remove selected content if present."
+                if desired == "absent"
+                else "Content selected by the JSON rule; the reference supplies selected values."
+            ),
+        )
+        self.previews[-1].update(
+            format=file["format"],
+            comparison=file.get("comparison", {}),
+            desired=desired,
+            requirement=item,
+        )
+        # Aggregate a rule's present snippets for the review/blank preview. Requirements
+        # remain separate, so each operation retains its own comparison semantics.
+        latest = self.previews[-1]
+        earlier = next(
+            (
+                p
+                for p in self.previews[:-1]
+                if p["rule"] == rule["id"]
+                and p["target_path"] == path
+                and p.get("desired") == desired == "present"
+                and p.get("format") not in ("xml", "binary")
+            ),
+            None,
+        )
+        if earlier is not None:
+            content = earlier["content"].rstrip("\n") + "\n" + latest["content"]
+            earlier.update(
+                content=content,
+                content_base64=base64.b64encode(content.encode("utf-8")).decode(
+                    "ascii"
+                ),
+            )
+            self.previews.pop()
+
+    def _write(self, path, text, rule, encoding="utf-8", *, file_type=None):
+        if self.blank:
+            return True
+        return self.propose(
+            path,
+            text.encode(encoding) if isinstance(text, str) else text,
+            rule,
+            file_type=file_type,
+        )
+
+    def _text(self, path, *, create=False):
+        if self.blank:
+            return "", "utf-8"
+        before = self.snapshot(path, optional=create)
+        raw = base64.b64decode(
+            self.edits.get(path, before).get("after", before["content"])
+        )
+        return decode(raw)
+
+    def parameters(self, value):
+        if isinstance(value, str):
+            return self.values.template(value)
+        if isinstance(value, list):
+            return [self.parameters(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self.parameters(v) for k, v in value.items()}
+        return value
+
+    def execute_step(self, rule, step):
+        step = dict(step)
+        for side in ("from", "to"):
+            if side in step:
+                file_id = step[side]["file"]
+                if not self.values.condition(
+                    self.catalog["files"][file_id].get("when", True)
+                ):
+                    raise RuleOutcome(
+                        "skipped", "File condition is disabled: " + file_id
+                    )
+        for key in (
+            "select",
+            "literal",
+            "fields",
+            "identity",
+            "parent",
+            "root",
+            "block",
+        ):
+            if key in step:
+                step[key] = self.parameters(step[key])
+        if "from" in step and "select" in step["from"]:
+            step["from"] = dict(
+                step["from"], select=self.parameters(step["from"]["select"])
+            )
+        op = step["op"]
+        if op == "manual":
+            return step.get("status", "manual"), self._message(step["message"])
+        if op == "assert":
+            if not self.values.condition(step["condition"]):
+                raise RuleOutcome(
+                    step.get("status", "blocked"), self._message(step["message"])
+                )
+            return "pass", "Declared precondition satisfied."
+        if op in ("file.exists", "path.assert"):
+            try:
+                path = self._file(step["to"]["file"])
+            except DiscoveryMiss as exc:
+                self._missing(step, "on_missing", str(exc))
+            expected = self._message(step.get("assert_path", ""))
+            if expected and expected not in path:
+                return (
+                    "review",
+                    "Current path does not contain the mapped family " + expected,
+                )
+            return "pass", self._message(
+                step.get("message", "Mapped current path exists.")
+            )
+        if (
+            op == "json.merge_missing"
+            and self.catalog["files"][step["from"]["file"]]["kind"] == "tree"
+        ):
+            return self.merge_tree(rule, step)
+        if op == "block.sync":
+            return self.sync_block(rule, step)
+        source_id = step.get("from", {}).get("file")
+        target_id = step.get("to", {}).get("file")
+        source_path = None
+        reference = ""
+        if source_id:
+            try:
+                source_path = self._file(source_id, optional=True)
+            except DiscoveryMiss as exc:
+                self._missing(step, "on_source_missing", str(exc), "skip")
+            if not source_path:
+                self._missing(
+                    step,
+                    "on_source_missing",
+                    "Absent in reference; no selected source content. Exact path(s) searched: "
+                    + "; ".join(self.resolver.attempts.get(source_id, [])),
+                    "skip",
+                )
+        if op in ("file.copy_if_missing", "tree.copy_missing"):
+            sources = (
+                [r["depotFile"] for r in source_path]
+                if isinstance(source_path, list)
+                else [source_path]
+            )
+            changed = False
+            notes = []
+            for src in sources:
+                dst = self.resolver.paired(
+                    src, source_id, target_id, step.get("pairing")
+                )
+                self.rule_paths.extend([src, dst])
+                snap = self.snapshot(src)
+                content = base64.b64decode(snap["content"])
+                self.requirement(rule, target_id, dst, preview=content, reference=src)
+                if not self.blank:
+                    before = self.snapshot(dst, optional=True)
+                    if before["revision"] is not None:
+                        if before["sha256"] != snap["sha256"]:
+                            notes.append(
+                                "Current file differs from reference; existing file is preserved."
+                            )
+                        continue
+                changed |= self._write(dst, content, rule, file_type=snap["type"])
+            return ("review" if notes else "change" if changed else "pass"), (
+                "\n".join(notes)
+                or (
+                    "Copy missing reference file."
+                    if changed
+                    else "Current and reference files are byte-for-byte identical; no change planned."
+                )
+            )
+        if source_path:
+            reference = decode(self.content(source_path))[0]
+            self.log(
+                f"{rule['id']}: reference source={source_path}; revision={self.snapshots[source_path]['revision']}"
+            )
+        select = step.get("from", {}).get("select", step.get("select", {}))
+        if op in ("xml.verify", "xml.ensure") and not xml_selected(
+            ET.fromstring(step.get("literal", reference)), select
+        ):
+            self._missing(
+                step,
+                "on_empty_selection",
+                "Reference contains no selected XML entries; examples are not mandatory.",
+                "skip",
+            )
+        create = (
+            self.blank or step.get("policy", {}).get("on_target_missing") == "create"
+        )
+        try:
+            path = self._file(target_id, absent=create)
+        except DiscoveryMiss as exc:
+            self._missing(step, "on_target_missing", str(exc))
+        text, encoding = self._text(path, create=create)
+        select = step.get("from", {}).get("select", step.get("select", {}))
+        literal = step.get("literal")
+        if op in ("make.remove", "text.remove", "block.remove"):
+            if op == "block.remove":
+                found = blocks(text, step["block"])
+                if len(found) > 1:
+                    raise ValueError("Ambiguous block removal")
+                after = text
+                for item in reversed(found):
+                    after = after[: item["start"]] + after[item["end"] :]
             else:
-                target_text, encoding = decode(self.content(dst))
-                merged, added = add_missing_features(reference_json, carrier_json(target_text))
-                changed = False
+                after = remove_content(text, select, make=op == "make.remove")
+            self.requirement(
+                rule, target_id, path, desired="absent", selector=select, step=step
+            )
+            changed = self._write(path, after, rule, encoding)
+            return ("change" if changed else "pass"), (
+                "Remove selected content."
+                if changed
+                else "Selected content is already absent."
+            )
+        if op in ("xml.verify", "xml.ensure"):
+            spec_step = dict(step, select=select)
+            xml_reference = literal if literal is not None else reference
+            if self.blank and op == "xml.verify":
+                return (
+                    "manual",
+                    "Verification-only rule; contributes no blank-file content.",
+                )
+            if not text:
+                if not step.get("root") and not self.blank:
+                    raise ValueError(
+                        "Creating an XML document requires an explicit root"
+                    )
+                root = step.get("root") or ET.fromstring(xml_reference).tag
+                text = "<" + root + "/>"
+            details = []
+            after, preview, notes = xml_operation(
+                xml_reference, text, spec_step, details=details
+            )
+            if not preview:
+                self._missing(
+                    step,
+                    "on_empty_selection",
+                    "Reference contains no selected XML entries; examples are not mandatory.",
+                    "skip",
+                )
+            if op == "xml.ensure":
+                self.requirement(
+                    rule,
+                    target_id,
+                    path,
+                    preview=preview,
+                    reference=source_path,
+                    step=spec_step,
+                )
+            changed = (
+                self._write(path, after, rule, encoding)
+                if op == "xml.ensure"
+                else False
+            )
+            return ("review" if notes else "change" if changed else "pass"), "\n".join(
+                details
+                + ([] if notes else ["Reference fields and minimum versions match."])
+            )
+        if op == "json.merge_missing":
+            source = json_object(reference)
+            after, added = merge_missing(
+                source, json_object(text) if text.strip() else {}
+            )
+            rendered = json.dumps(after, indent=2, ensure_ascii=False) + "\n"
+            self.requirement(
+                rule,
+                target_id,
+                path,
+                preview=reference,
+                reference=source_path,
+                step=step,
+            )
+            changed = self._write(
+                path, rendered if added or not text.strip() else text, rule, encoding
+            )
+            return (
+                "change" if changed else "pass"
+            ), "Missing JSON keys added; existing values preserved."
+        actions = select_actions(
+            op,
+            reference,
+            select,
+            literal,
+            step.get("policy", {}).get("context_patterns", []),
+        )
+        difference = step.get("policy", {}).get("on_value_difference", "replace")
+        for action in actions:
+            action["on_value_difference"] = difference
+        for action in actions:
+            for replacement in step.get("replacements", []):
+                old, new = replacement["old"], self._message(replacement["new"])
+                for key in ("commands", "lines"):
+                    if key in action:
+                        action[key] = [value.replace(old, new) for value in action[key]]
+        for action in actions:
+            if step.get("operator"):
+                action["operator"] = step["operator"]
+
+        def preview_log(notice):
+            message = notice if isinstance(notice, str) else notice["message"]
+            self.log(
+                f"{rule['id']}: empty-file preview: "
+                + message.replace(
+                    "whole current file; adding", "empty preview; adding"
+                ).replace("current file", "empty preview")
+            )
+
+        empty = apply_actions("", actions, preview_log)
+        if not empty:
+            self._missing(
+                step,
+                "on_empty_selection",
+                "Reference contains no matching selected statements; nothing is inserted.",
+                "skip",
+            )
+        notes = []
+
+        def report(notice):
+            if isinstance(notice, str):
+                self.log(f"{rule['id']}: current file: {notice}")
+            else:
+                self.presence_report(rule, path, review_notes=notes)(notice)
+
+        after = apply_actions(text, actions, report)
+        self.requirement(
+            rule, target_id, path, preview=empty, reference=source_path, step=step
+        )
+        changed = self._write(path, after, rule, encoding)
+        if step.get("policy", {}).get("report_current_only") and op == "make.values":
+            extra = set(
+                make_values(
+                    text,
+                    select.get("prefix", ""),
+                    select.get("assignment_patterns", []),
+                )
+            ) - set(actions[0]["values"])
+            if extra:
+                notes.append(
+                    "Current-only flags preserved for review: "
+                    + ", ".join(sorted(extra))
+                )
+        return ("review" if notes else "change" if changed else "pass"), (
+            (
+                "\n".join(notes)
+                + ("\nReference-selected edit proposed." if changed else "")
+            )
+            if notes
+            else (
+                "Reference-selected edit proposed."
+                if changed
+                else "Already match selected reference statements; no change planned. Other file content was not required to match."
+            )
+        )
+
+    def sync_block(self, rule, step):
+        source_id, target_id = step["from"]["file"], step["to"]["file"]
+        try:
+            src = self._file(source_id, optional=True)
+        except DiscoveryMiss as exc:
+            self._missing(step, "on_source_missing", str(exc), "skip")
+        if not src:
+            self._missing(
+                step,
+                "on_source_missing",
+                "Absent in reference. Exact path(s) searched: "
+                + "; ".join(self.resolver.attempts.get(source_id, [])),
+                "skip",
+            )
+        reference = decode(self.content(src))[0]
+        definition, choice = step["block"], step["choose"]
+        all_blocks = blocks(reference, definition)
+        if not all_blocks:
+            self._missing(
+                step,
+                "on_empty_selection",
+                "Reference has no recognized copy block; no default filter is imposed.",
+                "skip",
+            )
+        requested = self.values.eval(choice.get("input"))
+        prefix = self.values.eval(choice.get("prefix"))
+        candidates = (
+            [b for b in all_blocks if b[choice["field"]] == requested]
+            if requested
+            else [
+                b
+                for b in all_blocks
+                if str(b[choice["field"]]).lower().startswith(str(prefix or "").lower())
+            ]
+        )
+        if (
+            not requested
+            and not candidates
+            and choice.get("single_fallback")
+            and len(all_blocks) == 1
+        ):
+            candidates = all_blocks
+        if len(candidates) != 1:
+            raise ValueError(
+                "Cannot uniquely infer selected block: "
+                + ", ".join(str(b[choice["field"]]) for b in all_blocks)
+            )
+        selected = candidates[0]
+        members = self.values.eval(choice.get("required_members")) or []
+        if members:
+            patterns = selected[choice["members_field"]]
+            if any(
+                not any(
+                    re.fullmatch(re.escape(p).replace("%", ".*"), v) for p in patterns
+                )
+                for v in members
+            ):
+                raise ValueError(
+                    "Selected copy filter does not cover requested members"
+                )
+        for key, target in choice.get("export", {}).items():
+            if not get_value(self.config, target):
+                set_value(self.config, target, selected[key])
+        related = step.get("related", {})
+        eligible = []
+        for role in ("reference", "current"):
+            if role == "current" and self.blank:
+                continue
+            if role not in related:
+                continue
+            file_id = related[role]
+            records = self._file(file_id, optional=True)
+            eligible = [
+                r["depotFile"]
+                for r in records
+                if r["depotFile"].lower().endswith(related.get("suffix", "").lower())
+            ]
+            if not eligible:
+                raise RuleOutcome(
+                    "skipped" if role == "reference" else "review",
+                    f"Couldn't find {related.get('suffix','matching')} files in {role} folder. Searched: "
+                    + "; ".join(self.resolver.attempts[file_id])
+                    + ". Files found: "
+                    + ", ".join(r["depotFile"] for r in records),
+                )
+            if related.get("snapshot"):
+                for path in eligible:
+                    self.snapshot(path)
+        dst = self._file(target_id, absent=self.blank)
+        text, encoding = self._text(dst)
+        identity = definition["identity"]
+        found = [
+            b for b in blocks(text, definition) if b[identity] == selected[identity]
+        ]
+        if len(found) > 1:
+            raise ValueError("Current file has duplicate matching filter blocks")
+        replacement = (
+            selected["text"]
+            .replace("\r\n", "\n")
+            .replace("\n", "\r\n" if "\r\n" in text else "\n")
+        )
+        if found:
+            block = found[0]
+            changed = any(block[k] != selected[k] for k in definition["compare"])
+            after = (
+                text[: block["start"]] + replacement + text[block["end"] :]
+                if changed
+                else text
+            )
+        else:
+            marker = definition.get("unrecognized_marker", "")
+            for key, value in selected.items():
+                marker = marker.replace("{" + key + "}", str(value))
+            if marker and marker in text:
+                raise ValueError(
+                    "Current file mentions selected content in an unrecognized block"
+                )
+            after = (
+                text
+                + ("" if not text or text.endswith("\n") else "\n")
+                + replacement
+                + "\n"
+            )
+        self.requirement(
+            rule, target_id, dst, preview=selected["text"] + "\n", reference=src
+        )
+        self.previews[-1]["note"] += " Files verified: " + ", ".join(
+            eligible if related else []
+        )
+        changed = self._write(dst, after, rule, encoding)
+        return ("change" if changed else "pass"), "Folder " + str(
+            selected[identity]
+        ) + ": reference copy filter " + (
+            "will be added/updated." if changed else "already matches."
+        )
+
+    def merge_tree(self, rule, step):
+        source_id, target_id = step["from"]["file"], step["to"]["file"]
+        reference, inventory = self.resolver.inventory(source_id)
+        current, _ = self.resolver.inventory(target_id)
+        roots = self.resolver.candidates(source_id)
+        targets = self.resolver.candidates(target_id)
+        if len(roots) != 1 or len(targets) != 1:
+            raise ValueError("Tree merge needs unique source/destination roots")
+        root, dest = roots[0], targets[0]
+        filename = (
+            self.catalog["files"][source_id]
+            .get("filter", {})
+            .get("basename", "selected JSON")
+        )
+        meta = step.get("inventory", {})
+        label = meta.get("label", "Tree")
+        self.log(
+            f"{label} discovery: {root}/...; {len(inventory)} files found; {len(reference)} named exactly {filename}."
+        )
+        selected = {r["depotFile"] for r in reference}
+        regions = set()
+        for record in inventory:
+            path = record["depotFile"]
+            directory, base = path.rsplit("/", 1)
+            if base in meta.get("markers", []):
+                regions.add(directory)
+            if meta.get("filename_prefix") and base.startswith(meta["filename_prefix"]):
+                regions.add(
+                    directory.rsplit("/", 1)[0]
+                    if directory.rsplit("/", 1)[-1].lower()
+                    in meta.get("parent_dirs", [])
+                    else directory
+                )
+        if inventory and not regions:
+            regions.add(root)
+        for region in sorted(regions):
+            if any(p.startswith(region + "/") for p in selected):
+                continue
+            found = [r for r in inventory if r["depotFile"].startswith(region + "/")]
+            for r in found:
+                self.log(
+                    f"{label} file found and skipped: {r['depotFile']} ({r.get('type','unknown')}); only {filename} is eligible."
+                )
+            self.result(
+                rule,
+                "skipped",
+                f"No {filename} anywhere under this reference region after searching its entire subtree; left untouched. Files found: "
+                + ", ".join(
+                    r["depotFile"].rsplit("/", 1)[-1]
+                    + " ("
+                    + r.get("type", "unknown")
+                    + ")"
+                    for r in found
+                ),
+                [region, *[r["depotFile"] for r in found]],
+            )
+        changed = False
+        for record in reference:
+            src = record["depotFile"]
+            dst = dest + src[len(root) :]
+            self.rule_paths.extend([src, dst])
+            self.log(f"{label} JSON file found: {src} ({record.get('type','text')}).")
+            snap = self.snapshot(src)
+            content = base64.b64decode(snap["content"])
+            reference_json = json_object(decode(content)[0])
+            self.requirement(rule, target_id, dst, preview=content, reference=src)
+            before = None if self.blank else self.snapshot(dst, optional=True)
+            if self.blank or before["revision"] is None:
+                changed |= self._write(dst, content, rule, file_type=snap["type"])
+            else:
+                text, encoding = self._text(dst)
+                merged, added = merge_missing(reference_json, json_object(text))
                 if added:
-                    newline = "\r\n" if "\r\n" in target_text else "\n"
-                    after = (json.dumps(merged, indent=2, ensure_ascii=False) + "\n").replace("\n", newline)
-                    changed = self.propose(dst, after.encode(encoding), rule)
-                message = f"{relative}: added {len(added)} missing keys; existing values kept."
-            self.result(rule, "change" if changed else "pass",
-                        message, [src, dst])
-        for relative in sorted(current.keys() - reference.keys()):
-            self.result(rule, "review", "Current-only carrier file has no same-region reference; left untouched: " + relative,
-                        [current[relative]])
+                    after = (
+                        json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+                    ).replace("\n", "\r\n" if "\r\n" in text else "\n")
+                    changed |= self._write(dst, after, rule, encoding)
+        for record in current:
+            self.log(
+                f"{label} JSON file found: {record['depotFile']} ({record.get('type','text')})."
+            )
+        if not reference:
+            return (
+                "review",
+                f"No {filename}: "
+                + (
+                    f"Perforce returned no files for {root}/..."
+                    if not inventory
+                    else f"Perforce returned {len(inventory)} files for {root}/..., but none matched the exact filename {filename}"
+                )
+                + "; check exact depot/directory casing and selection.",
+            )
+        expected = {dest + p[len(root) :] for p in selected}
+        extras = {r["depotFile"] for r in current} - expected
+        if extras and step.get("policy", {}).get("report_current_only"):
+            self.result(
+                rule,
+                "review",
+                "Current-only files have no same-region reference; left untouched.",
+                sorted(extras),
+            )
+            return (
+                "change" if changed else "pass"
+            ), "Reference regions processed; current-only files retained."
+        return (
+            "change" if changed else "pass"
+        ), "Added missing JSON files/keys; existing values kept."
 
 
 def save_plan(plan, directory):
@@ -702,39 +1134,76 @@ def save_plan(plan, directory):
     output = directory / "plan.json"
     output.write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
     (directory / "plan.txt").write_text(summary(plan), encoding="utf-8")
-    (directory / "empty-file-previews.txt").write_text(preview_summary(plan), encoding="utf-8")
+    (directory / "empty-file-previews.txt").write_text(
+        preview_summary(plan), encoding="utf-8"
+    )
     return output
 
 
 def summary(plan):
-    counts = {status: sum(c["status"] == status for c in plan["checks"]) for status in ("pass", "change", "blocked", "review", "manual", "skipped")}
-    lines = ["SLSI Bluetooth delta plan", f"Plan: {plan['digest']}", f"Mode: {plan['mode']}",
-             f"Source: {plan['source']}", f"Files to change: {len(plan['changes'])}; checks: {counts}",
-             ("Inspection-only comparison plan; cannot be approved or applied. Basis: " + plan.get("comparison_basis", "")
-              if plan["mode"] == "comparison" else
-              "Approval applies only to these exact changes. BLOCKED checks stay untouched and are reported after apply. Creates a pending changelist; never shelves or submits."), ""]
-    for key in ("current", "reference"):
-        lines.append(f"{key}: {json.dumps(plan['config'][key])}")
-    current = role_settings(plan["config"], "current")
-    lines.append("Resolved model settings: " + json.dumps({k: current.get(k) for k in ("model", "chipset", "firmware", "ap", "jdm", "hcf_variant", "products")}))
+    counts = {
+        status: sum(c["status"] == status for c in plan["checks"])
+        for status in ("pass", "change", "blocked", "review", "manual", "skipped")
+    }
+    lines = [
+        plan.get("title", "Delta plan"),
+        f"Plan: {plan['digest']}",
+        f"Mode: {plan['mode']}",
+        f"Source: {plan['source']}",
+        f"Files to change: {len(plan['changes'])}; checks: {counts}",
+        (
+            "Inspection-only comparison plan; cannot be approved or applied. Basis: "
+            + plan.get("comparison_basis", "")
+            if plan["mode"] == "comparison"
+            else "Approval applies only to these exact changes. BLOCKED checks stay untouched and are reported after apply. Creates a pending changelist; never shelves or submits."
+        ),
+        "",
+    ]
+    lines.append(
+        "Resolved inputs: "
+        + json.dumps(plan.get("variables", plan.get("config", {})), ensure_ascii=False)
+    )
     for check in plan["checks"]:
-        lines.extend(["", f"[{check['status'].upper()}] {check['title']} ({check['source']})", check["message"], *check["paths"]])
+        lines.extend(
+            [
+                "",
+                f"[{check['status'].upper()}] {check['title']} ({check['source']})",
+                check["message"],
+                *check["paths"],
+            ]
+        )
     for change in plan["changes"]:
-        lines.extend(["", "=" * 72, f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}",
-                      f"Workspace file: {change['local_path']}" if change['local_path'] else "Comparison only; no local workspace target required.",
-                      "Checklist: " + ", ".join(change["sources"]), change["diff"]])
+        lines.extend(
+            [
+                "",
+                "=" * 72,
+                f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}",
+                (
+                    f"Workspace file: {change['local_path']}"
+                    if change["local_path"]
+                    else "Comparison only; no local workspace target required."
+                ),
+                "Checklist: " + ", ".join(change["sources"]),
+                change["diff"],
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
 def compact_summary(plan):
     """Approval view: statuses and filenames, followed by exact proposed diffs."""
-    views = [(key.split(".")[0], parse_view(spec))
-             for key, spec in plan.get("templates", {}).items()]
+    views = [
+        (plan.get("source_roles", {}).get(key, key.split(".")[0]), parse_view(spec))
+        for key, spec in plan.get("templates", {}).items()
+    ]
     known_roles = {}
     for preview in plan.get("previews", []):
         for key, role in (("reference_path", "reference"), ("target_path", "current")):
             if preview.get(key):
                 known_roles.setdefault(preview[key], set()).add(role)
+    for check in plan.get("checks", []):
+        for item in check.get("evidence", []):
+            known_roles.setdefault(item["path"], set()).add(item["role"])
     for change in plan["changes"]:
         known_roles.setdefault(change["path"], set()).add("current")
 
@@ -746,15 +1215,16 @@ def compact_summary(plan):
             except MappingError:
                 continue
             roles.add(role)
-        for role in ("reference", "current"):
-            csc = plan.get("config", {}).get(role, {}).get("csc_path", "").rstrip("/")
-            if csc and path.startswith(csc + "/"):
-                roles.add(role)
+        for source, root in plan.get("source_roots", {}).items():
+            if path.startswith(root + "/"):
+                roles.add(plan.get("source_roles", {}).get(source, "unknown"))
         return roles
 
     lines = []
     for check in plan["checks"]:
-        lines.append(f"[{check['status'].upper()}] {check['title']} ({check['source']})")
+        lines.append(
+            f"[{check['status'].upper()}] {check['title']} ({check['source']})"
+        )
         files = {"reference": [], "current": [], "unknown": []}
         for path in dict.fromkeys(check.get("paths", [])):
             for role in roles_for(path) or {"unknown"}:
@@ -768,21 +1238,34 @@ def compact_summary(plan):
     if not plan["changes"]:
         lines.append("None.")
     for change in plan["changes"]:
-        lines.extend(["", f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}", change["diff"]])
+        lines.extend(
+            [
+                "",
+                f"{'ADD' if change['revision'] is None else 'EDIT'} {change['path']}",
+                change["diff"],
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
 def preview_summary(plan):
-    lines = ["Empty-file and reference-source previews",
-             "Inspection only: these previews are not workspace files and are never applied directly.",
-             "Each section shows what one rule sees or would construct if its current target were empty."]
+    lines = [
+        "Empty-file and reference-source previews",
+        "Inspection only: these previews are not workspace files and are never applied directly.",
+        "Each section shows what one rule sees or would construct if its current target were empty.",
+    ]
     previews = plan.get("previews", [])
     if not previews:
         lines.extend(["", "No preview content was available for this plan."])
     for item in previews:
-        lines.extend(["", "=" * 80,
-                      f"{item['title']} ({item['source']})",
-                      f"Target: {item['target_path']}"])
+        lines.extend(
+            [
+                "",
+                "=" * 80,
+                f"{item['title']} ({item['source']})",
+                f"Target: {item['target_path']}",
+            ]
+        )
         if item.get("reference_path"):
             lines.append(f"Reference: {item['reference_path']}")
         if item.get("note"):

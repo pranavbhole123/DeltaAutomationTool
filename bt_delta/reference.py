@@ -1,4 +1,4 @@
-"""Select and copy Bluetooth-related statements from resolved reference files."""
+"""Select and copy selected statements from resolved reference files."""
 import copy
 import re
 
@@ -18,7 +18,7 @@ def _matches(patterns, value):
     return any(pattern.search(value) for pattern in patterns)
 
 
-def _package_entries(text):
+def _package_entries(text, variable="PRODUCT_PACKAGES"):
     """Record each package list together with its enclosing conditional branches."""
     lines, stack = text.splitlines(keepends=True), []
     for start, end, logical, _ in _make_statements(text):
@@ -37,7 +37,7 @@ def _package_entries(text):
             stack.pop()
         else:
             assignment = _ASSIGNMENT.match(logical)
-            if assignment and assignment['key'] == 'PRODUCT_PACKAGES':
+            if assignment and assignment['key'] == variable:
                 yield {'start': start, 'assignment': assignment.groupdict(), 'text': raw,
                        'guards': copy.deepcopy(stack),
                        'context': tuple(tuple(' '.join(code.split()) for code, _ in frame['branches'])
@@ -48,7 +48,7 @@ def _reference_packages(text, action):
     patterns = _patterns(action.get("reference_package_patterns", []), "package")
     static = set(action.get("packages", []))
     selected, conditional = [], []
-    for entry in _package_entries(text):
+    for entry in _package_entries(text, action.get("variable", "PRODUCT_PACKAGES")):
         tokens = entry['assignment']['value'].split()
         packages = list(dict.fromkeys(token for token in tokens if token in static or _matches(patterns, token)))
         if not packages:
@@ -65,9 +65,9 @@ def _reference_packages(text, action):
     return selected, conditional
 
 
-def _apply_conditional_packages(current, entries, *, report=None):
+def _apply_conditional_packages(current, entries, *, report=None, variable="PRODUCT_PACKAGES"):
     locations, added = {}, set()
-    for entry in _package_entries(current):
+    for entry in _package_entries(current, variable):
         for token in entry['assignment']['value'].split():
             locations.setdefault(token, []).append(entry)
     for source in entries:
@@ -89,7 +89,7 @@ def _apply_conditional_packages(current, entries, *, report=None):
         if not missing:
             continue
         statement = (source['text'] if missing == source['assignment']['value'].split() else
-                     transform('', {'type': 'make_packages', 'packages': missing}))
+                     transform('', {'type': 'make_packages', 'packages': missing, 'variable': variable}))
         prefix = ''.join(raw.rstrip('\r\n') + '\n' for guard in source['guards']
                          for _, raw in guard['branches'])
         suffix = ''.join(guard['close'] + '\n' for guard in reversed(source['guards']))
@@ -117,7 +117,7 @@ def _reference_lines(text, action):
             selected.append(line)
     ambiguous = conditional - set(selected)
     if ambiguous:
-        raise TransformError("Reference Bluetooth include is conditional; review before copying: " +
+        raise TransformError("Reference include is conditional; review before copying: " +
                              ", ".join(sorted(ambiguous)))
     return selected
 
@@ -138,7 +138,7 @@ def _reference_init_commands(text, action):
         tokens = _tokens(command)
         requested.append((command, tokens, _command_key(tokens)))
     start, end = (ranges[0] if len(ranges) == 1
-                  else _select_init_stanza(lines, ranges, requested, event))
+                  else _select_init_stanza(lines, ranges, requested, event, action.get("context_patterns", [])))
     static_keys = {_command_key(_tokens(command)) for command in action.get("commands", [])}
     selected = []
     anchored = False
@@ -154,7 +154,7 @@ def _reference_init_commands(text, action):
         if not tokens or tokens[0] in ("on", "service", "import"):
             continue
         command = code.strip()
-        direct = _matches(command_patterns, code) if command_patterns else False
+        direct = _matches(command_patterns, command) if command_patterns else False
         if (direct or anchored or _command_key(tokens) in static_keys) and command not in selected:
             selected.append(command)
     return selected
@@ -190,7 +190,7 @@ def augment_actions_from_reference(reference, actions):
 def apply_reference_action(current, action, *, report=None):
     if action["type"] == "make_packages":
         current = transform(current, action, report=report)
-        return _apply_conditional_packages(current, action.get('conditional_packages', []), report=report)
+        return _apply_conditional_packages(current, action.get('conditional_packages', []), report=report, variable=action.get('variable', 'PRODUCT_PACKAGES'))
     if action["type"] == "reference_assignments":
         forward = (lambda message: report({"message": message, "review": False})) if report else None
         return copy_make_settings(current, action["reference"], action["keys"], [], report=forward)

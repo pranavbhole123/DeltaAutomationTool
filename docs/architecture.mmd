@@ -1,45 +1,21 @@
 flowchart TD
-    entry["main.py → cli.py<br/>Tkinter GUI or CLI<br/>GUI: worker → event queue → UI"]
-    inputs["config.py<br/>Four templates, model, P4 workspace<br/>Optional paths, CSC and current build log"]
-    rules["catalog.py<br/>Default or supplied catalogue"]
-    discovery["resolver.py<br/>Template Views → exact mapped paths<br/>Overrides, exclusions, cached discovery"]
-    selection["reference.py + transforms.py + csc.py<br/>Select reference content, preserve guards<br/>Avoid duplicate edits; optional CSC merge"]
-    entry --> inputs --> discovery
-    rules --> planner
-    discovery --> planner
-    selection --> planner
-    subgraph Planning["Planning — read only"]
-        planner["Planner · planner.py<br/>Read snapshots; evaluate rules; compute edits"]
-        plan["Sealed normal plan<br/>Checks, before/after content, diffs and digest<br/>plan.json + plan.txt"]
-        preview["Tab 4: Empty-file preview<br/>Includes no-op normal rules"]
-        blank["BlankPlanner · blank.py<br/>Generate preview when none is reusable"]
-        planner --> plan
-        planner --> preview
-        blank --> preview
-    end
-    inputs --> blank
-    discovery --> blank
-    rules --> blank
-    selection --> blank
-    subgraph Apply["Apply — approved writes"]
-        approve["Tab 3: Review and approve"]
-        executor["executor.py<br/>Validate approval, identity, Views,<br/>snapshots and workspace state"]
-        pending["Create pending CL<br/>Sync / edit / add exact files<br/>Write, verify and journal"]
-        plan --> approve --> executor --> pending
-    end
-    subgraph Comparison["Comparison — read only"]
-        cls["Selected CLs<br/>Submitted revisions / shelves / workspace<br/>Combine selected edits"]
-        compare["comparison.py<br/>Match surviving additions to preview"]
-        latest["Unmatched: check latest exact target<br/>Present → Already present<br/>Absent → Missing; read failure → Error"]
-        report["comparison_report.py → Tab 7<br/>Matched / Already present / Missing / Extra / Error<br/>comparison.json + comparison.txt"]
-        preview --> compare
-        cls --> compare --> latest --> report
-    end
-    p4["perforce.py · P4CLI<br/>p4 subprocess + existing login ticket"]
-    discovery -. reads .-> p4
-    planner -. reads .-> p4
-    blank -. reads .-> p4
-    cls -. reads .-> p4
-    latest -. reads .-> p4
-    executor -. validates .-> p4
-    pending -. writes .-> p4
+    json["Selected JSON rule file<br/>Inputs · sources · routes · selectors<br/>Derivations · operations · comparison policy"]
+    load["spec.py + schema.py<br/>Version/grammar/reference/cycle validation<br/>No pack-name or rule-ID dispatch"]
+    inputs["gui.py / cli.py → config.py<br/>Dynamic project inputs + P4 connection<br/>expressions.py: derive values and eligibility"]
+    resolve["resolver.py<br/>Declared routes → effective View/root coverage<br/>Exact file / bounded tree queries"]
+    pure["operations.py + reference.py + transforms.py + json_ops.py<br/>Reusable Make · init · XML · JSON · text operations"]
+    plan["planner.py<br/>Read pinned revisions · execute rule steps<br/>Accumulate edits · roll back failed rule"]
+    output["Sealed normal plan<br/>Checks · evidence · before/after bytes · diff<br/>Tabs 3/8 + plan.json / plan.txt"]
+    preview["Inspection-only previews + requirements<br/>Same interpreter in blank.py mode<br/>Tab 4 · no target-content reads in blank mode"]
+    compare["comparison.py + comparison_report.py<br/>Selected CL edits + latest target content<br/>Additions / required removals / extra changes<br/>Tabs 6/7 + comparison.json / comparison.txt"]
+    approval["User reviews exact plan and acknowledges findings"]
+    apply["executor.py<br/>Verify digest, identity, Views, revisions and local state<br/>Create pending CL · write verified bytes · journal<br/>Never auto-shelve or submit"]
+    p4["perforce.py<br/>p4 CLI + existing login ticket<br/>Read calls during plan/compare; write calls only during apply"]
+    json --> load --> inputs --> resolve --> plan
+    pure --> plan
+    plan --> output --> approval --> apply
+    plan --> preview --> compare
+    resolve -. reads .-> p4
+    plan -. reads .-> p4
+    compare -. reads .-> p4
+    apply -. validates and writes .-> p4

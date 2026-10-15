@@ -1,0 +1,12 @@
+{
+  "rules_file": "camera-rules.json",
+  "baseline_template": "CAMERA_BASELINE",
+  "destination_template": "CAMERA_CURRENT",
+  "component": "camera",
+  "perforce": {
+    "port": "YOUR_P4_SERVER",
+    "user": "YOUR_USER",
+    "client": "YOUR_WORKSPACE"
+  },
+  "paths": {}
+}

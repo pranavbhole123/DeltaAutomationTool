@@ -163,7 +163,7 @@ def execute(p4, plan, approval, *, acknowledge_reviews=False, acknowledge_blocke
     save()
     try:
         p4.enable_writes()
-        cl = p4.create_change(f"[Title] SLSI Bluetooth delta for {plan['config']['model']}\n"
+        cl = p4.create_change(f"[Title] {plan.get('changelist_description', plan.get('title', 'Reviewed delta changes'))}\n"
                               f"[Checklist] {plan['source']}\n[Approved plan] {plan['digest']}\n"
                               "[Validation] Review plan checks and perform listed device checks after build.")
         journal.update(change=cl, status="applying")

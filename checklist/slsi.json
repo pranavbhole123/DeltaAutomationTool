@@ -1,83 +1,1167 @@
 {
-  "schema_version": 1,
-  "path_rules": {
-    "system": {
-      "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/BoardConfigCommon.mk"},
-      "bluetooth_header": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/Bluetooth/bdroid_buildcfg.h"},
-      "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/device/{common_device}/device_common.mk"},
-      "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_sssi/vendor/{common_device}/SecProductFeature.common"},
-      "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"}
+  "schema_version": 2,
+  "id": "slsi",
+  "title": "SLSI Bluetooth Delta",
+  "source": "159551_BT Delta Checklist.xlsx / SLSI",
+  "inputs": {
+    "current.system_template": {
+      "type": "string",
+      "label": "Current system template",
+      "required": true,
+      "group": "Templates"
     },
-    "vendor": {
-      "bluetooth_folder": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/Bluetooth"},
-      "board_config": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/BoardConfigCommon.mk"},
-      "device_common": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/device_common.mk"},
-      "model_init": [
-        {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.{model}.rc"},
-        {"anchor": "/EXYNOS/", "relative": "{model}_vendor/device/{common_device}/init.model.rc"}
-      ],
-      "sec_product": {"anchor": "/EXYNOS/", "relative": "{model}_vendor/vendor/{common_device}/SecProductFeature.common"},
-      "root_init": {"anchor": "/ESSI/android/", "relative": "system/core/rootdir/init.rc"},
-      "manifest": {"anchor": "/EXYNOS/android/", "relative": "device/samsung/{ap}/manifest.xml"},
-      "hcf_makefile": {"anchor": "/vendor/samsung/hardware/vendor/", "relative": "bluetooth/slsi/{chipset}/bluetooth.mk"},
-      "hcf": {"anchor": "/vendor/samsung/hardware/vendor/", "relative": "bluetooth/slsi/{chipset}"},
-      "firmware": {"anchor": "/EXYNOS/android/", "relative": "vendor/samsung_slsi/mx140/firmware/{firmware}/mx140.bin"}
+    "current.vendor_template": {
+      "type": "string",
+      "label": "Current vendor template",
+      "required": true,
+      "group": "Templates"
+    },
+    "current.csc_path": {
+      "type": "depot",
+      "label": "Current CSC root",
+      "default": "",
+      "required_when": {
+        "input": "check_csc_features"
+      },
+      "group": "Templates"
+    },
+    "reference.system_template": {
+      "type": "string",
+      "label": "Reference system template",
+      "required": true,
+      "group": "Templates"
+    },
+    "reference.vendor_template": {
+      "type": "string",
+      "label": "Reference vendor template",
+      "required": true,
+      "group": "Templates"
+    },
+    "reference.csc_path": {
+      "type": "depot",
+      "label": "Reference CSC root",
+      "default": "",
+      "required_when": {
+        "input": "check_csc_features"
+      },
+      "group": "Templates"
+    },
+    "model": {
+      "type": "string",
+      "label": "Model",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": true,
+      "group": "Project",
+      "required": true,
+      "derive": {
+        "lower": {
+          "strip": {
+            "regex": {
+              "text": {
+                "input": "current.system_template"
+              },
+              "pattern": "(?i)_D\\d+_([A-Z0-9]+)-"
+            }
+          }
+        }
+      }
+    },
+    "chipset": {
+      "type": "string",
+      "label": "Chipset (optional)",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": true,
+      "group": "Project"
+    },
+    "ap": {
+      "type": "string",
+      "label": "AP directory",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": false,
+      "group": "Project"
+    },
+    "common_device": {
+      "type": "string",
+      "label": "Common device",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": false,
+      "group": "Project"
+    },
+    "hcf_variant": {
+      "type": "string",
+      "label": "HCF folder",
+      "default": "",
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": false,
+      "group": "Project"
+    },
+    "current_log_path": {
+      "type": "path",
+      "label": "Current build log (optional)",
+      "default": "",
+      "group": "Project"
+    },
+    "jdm": {
+      "type": "boolean",
+      "label": "JDM",
+      "default": false,
+      "group": "Project"
+    },
+    "check_csc_features": {
+      "type": "boolean",
+      "label": "Check CSC features",
+      "default": false,
+      "group": "Templates"
+    },
+    "products": {
+      "type": "list",
+      "label": "TARGET_PRODUCT names",
+      "default": [],
+      "pattern": "[A-Za-z0-9_.-]+",
+      "visible": false
     }
   },
-  "source": "159551_BT Delta Checklist.xlsx / SLSI",
-  "chipsets": {
-    "s5e8535": "rice_s620",
-    "s5e8835": "quartz_s621p",
-    "s5e8825": "papaya_s620",
-    "s5e8845": "rose_s621p"
+  "sources": {
+    "current.system": {
+      "kind": "template",
+      "input": "current.system_template",
+      "role": "current"
+    },
+    "current.vendor": {
+      "kind": "template",
+      "input": "current.vendor_template",
+      "role": "current"
+    },
+    "current.csc": {
+      "kind": "depot_root",
+      "root": {
+        "var": "current.csc_root"
+      },
+      "role": "current",
+      "when": {
+        "input": "check_csc_features"
+      }
+    },
+    "reference.system": {
+      "kind": "template",
+      "input": "reference.system_template",
+      "role": "reference"
+    },
+    "reference.vendor": {
+      "kind": "template",
+      "input": "reference.vendor_template",
+      "role": "reference"
+    },
+    "reference.csc": {
+      "kind": "depot_root",
+      "root": {
+        "var": "reference.csc_root"
+      },
+      "role": "reference",
+      "when": {
+        "input": "check_csc_features"
+      }
+    }
+  },
+  "lookups": {
+    "firmware": {
+      "s5e8535": "rice_s620",
+      "s5e8835": "quartz_s621p",
+      "s5e8825": "papaya_s620",
+      "s5e8845": "rose_s621p"
+    },
+    "ap": {
+      "s5e8835": "erd8835"
+    }
+  },
+  "derive": {
+    "log.chipset": {
+      "value": {
+        "log": {
+          "input": "current_log_path",
+          "label": "ro.product.board",
+          "pattern": "(?im)^\\s*ro\\.product\\.board\\s*=\\s*(.*?)\\s*$",
+          "destination": "current chipset"
+        }
+      },
+      "export": "current.build_log_inputs.chipset"
+    },
+    "log.model": {
+      "value": {
+        "log": {
+          "input": "current_log_path",
+          "label": "TARGET",
+          "pattern": "(?im)^\\s*TARGET\\s*:\\s*(.*?)\\s*$",
+          "destination": "current model"
+        }
+      },
+      "export": "current.build_log_inputs.model"
+    },
+    "log.ap": {
+      "value": {
+        "log": {
+          "input": "current_log_path",
+          "label": "MODEL",
+          "pattern": "(?im)^\\s*MODEL\\s*:\\s*(.*?)\\s*$",
+          "destination": "current ap"
+        }
+      },
+      "export": "current.build_log_inputs.ap"
+    },
+    "reference.model": {
+      "value": {
+        "input": "model"
+      }
+    },
+    "reference.common_device": {
+      "value": {
+        "coalesce": [
+          {
+            "input": "common_device"
+          },
+          {
+            "template": "${reference.model}_common"
+          }
+        ]
+      },
+      "export": "common_device"
+    },
+    "reference.vendor": {
+      "value": {
+        "coalesce": [
+          {
+            "assignment": {
+              "file": "reference.system.board_config",
+              "key": "WLAN_VENDOR"
+            }
+          },
+          {
+            "assignment": {
+              "file": "reference.vendor.board_config",
+              "key": "WLAN_VENDOR"
+            }
+          }
+        ]
+      }
+    },
+    "reference.board_chip": {
+      "value": {
+        "lower": {
+          "strip": {
+            "coalesce": [
+              {
+                "assignment": {
+                  "file": "reference.system.board_config",
+                  "key": "WLAN_CHIP"
+                }
+              },
+              {
+                "assignment": {
+                  "file": "reference.vendor.board_config",
+                  "key": "WLAN_CHIP"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reference.chipset": {
+      "value": {
+        "lower": {
+          "strip": {
+            "coalesce": [
+              {
+                "input": "chipset"
+              },
+              {
+                "var": "reference.board_chip"
+              },
+              {
+                "var": "log.chipset"
+              }
+            ]
+          }
+        }
+      },
+      "export": "chipset",
+      "required": true
+    },
+    "reference.firmware": {
+      "value": {
+        "lookup": {
+          "table": "firmware",
+          "key": {
+            "var": "reference.chipset"
+          }
+        }
+      },
+      "export": "firmware",
+      "required": true
+    },
+    "reference.ap": {
+      "value": {
+        "coalesce": [
+          {
+            "input": "ap"
+          },
+          {
+            "lookup": {
+              "table": "ap",
+              "key": {
+                "var": "reference.chipset"
+              }
+            }
+          },
+          {
+            "regex": {
+              "text": {
+                "file_text": "reference.vendor.board_config"
+              },
+              "pattern": "(?m)^\\s*-?include\\s+device/samsung/([^/\\s]+)/BoardConfig[^\\s]*",
+              "exclude": [
+                {
+                  "var": "reference.common_device"
+                }
+              ]
+            }
+          },
+          {
+            "regex": {
+              "text": {
+                "file_text": "reference.system.board_config"
+              },
+              "pattern": "(?m)^\\s*-?include\\s+device/samsung/([^/\\s]+)/BoardConfig[^\\s]*",
+              "exclude": [
+                {
+                  "var": "reference.common_device"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "export": "ap"
+    },
+    "current.model": {
+      "value": {
+        "coalesce": [
+          {
+            "var": "log.model"
+          },
+          {
+            "var": "reference.model"
+          }
+        ]
+      }
+    },
+    "current.common_device": {
+      "value": {
+        "if": {
+          "eq": [
+            {
+              "var": "current.model"
+            },
+            {
+              "var": "reference.model"
+            }
+          ]
+        },
+        "then": {
+          "var": "reference.common_device"
+        },
+        "else": {
+          "template": "${current.model}_common"
+        }
+      }
+    },
+    "current.chipset": {
+      "value": {
+        "coalesce": [
+          {
+            "var": "log.chipset"
+          },
+          {
+            "var": "reference.chipset"
+          }
+        ]
+      }
+    },
+    "current.firmware": {
+      "value": {
+        "lookup": {
+          "table": "firmware",
+          "key": {
+            "var": "current.chipset"
+          }
+        }
+      },
+      "required": true
+    },
+    "current.ap": {
+      "value": {
+        "coalesce": [
+          {
+            "var": "log.ap"
+          },
+          {
+            "var": "reference.ap"
+          }
+        ]
+      }
+    },
+    "efs": {
+      "value": {
+        "if": {
+          "input": "jdm"
+        },
+        "then": "/efs",
+        "else": "/mnt/vendor/efs"
+      }
+    },
+    "reference.digits": {
+      "value": {
+        "last_digits": {
+          "var": "reference.chipset"
+        }
+      }
+    },
+    "reference.ap_candidates": {
+      "value": {
+        "list": [
+          {
+            "var": "reference.ap"
+          },
+          {
+            "template": "erd${reference.digits}"
+          },
+          {
+            "template": "universal${reference.digits}"
+          }
+        ]
+      }
+    },
+    "reference.csc_root": {
+      "value": {
+        "path_root": {
+          "path": {
+            "input": "reference.csc_path"
+          },
+          "component": {
+            "var": "reference.model"
+          }
+        }
+      },
+      "when": {
+        "input": "check_csc_features"
+      }
+    },
+    "current.digits": {
+      "value": {
+        "last_digits": {
+          "var": "current.chipset"
+        }
+      }
+    },
+    "current.ap_candidates": {
+      "value": {
+        "if": {
+          "present": {
+            "var": "log.ap"
+          }
+        },
+        "then": {
+          "list": [
+            {
+              "var": "log.ap"
+            }
+          ]
+        },
+        "else": {
+          "list": [
+            {
+              "var": "current.ap"
+            },
+            {
+              "template": "erd${current.digits}"
+            },
+            {
+              "template": "universal${current.digits}"
+            }
+          ]
+        }
+      }
+    },
+    "current.csc_root": {
+      "value": {
+        "path_root": {
+          "path": {
+            "input": "current.csc_path"
+          },
+          "component": {
+            "var": "current.model"
+          }
+        }
+      },
+      "when": {
+        "input": "check_csc_features"
+      }
+    }
+  },
+  "files": {
+    "reference.system.board_config": {
+      "source": "reference.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_sssi/device/${reference.common_device}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.system.bluetooth_header": {
+      "source": "reference.system",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_sssi/device/${reference.common_device}/Bluetooth/bdroid_buildcfg.h"
+        }
+      ],
+      "comparison": {
+        "include": false
+      }
+    },
+    "reference.system.device_common": {
+      "source": "reference.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_sssi/device/${reference.common_device}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.system.sec_product": {
+      "source": "reference.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_sssi/vendor/${reference.common_device}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.system.root_init": {
+      "source": "reference.system",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/ESSI/android/",
+          "relative": "system/core/rootdir/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "reference.vendor.bluetooth_folder": {
+      "source": "reference.vendor",
+      "kind": "tree",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/device/${reference.common_device}/Bluetooth"
+        }
+      ]
+    },
+    "reference.vendor.board_config": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/device/${reference.common_device}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.vendor.device_common": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/device/${reference.common_device}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.vendor.model_init": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/device/${reference.common_device}/init.${reference.model}.rc"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/device/${reference.common_device}/init.model.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "reference.vendor.sec_product": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${reference.model}_vendor/vendor/${reference.common_device}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.vendor.root_init": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/ESSI/android/",
+          "relative": "system/core/rootdir/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "reference.vendor.manifest": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "mapped_regex": "/EXYNOS[0-9]*/android/device/samsung/(?P<ap>[^/]+)/$",
+          "capture": "ap",
+          "allowed": {
+            "var": "reference.ap_candidates"
+          },
+          "append": "manifest.xml"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/android/",
+          "relative": "device/samsung/${reference.ap}/manifest.xml"
+        }
+      ],
+      "comparison": {
+        "include": false,
+        "xml_identity": {
+          "hal": [
+            "name"
+          ]
+        }
+      }
+    },
+    "reference.vendor.hcf_makefile": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/vendor/samsung/hardware/vendor/",
+          "relative": "bluetooth/slsi/${reference.chipset}/bluetooth.mk"
+        },
+        {
+          "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${reference.chipset}/bluetooth.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "reference.vendor.hcf": {
+      "source": "reference.vendor",
+      "kind": "tree",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/vendor/samsung/hardware/vendor/",
+          "relative": "bluetooth/slsi/${reference.chipset}"
+        },
+        {
+          "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${reference.chipset}"
+        }
+      ],
+      "filter": {
+        "relative_regex": "^${reference.model}[a-zA-Z0-9_-]*/"
+      }
+    },
+    "reference.vendor.firmware": {
+      "source": "reference.vendor",
+      "kind": "file",
+      "format": "binary",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/android/",
+          "relative": "vendor/samsung_slsi/mx140/firmware/${reference.firmware}/mx140.bin"
+        }
+      ]
+    },
+    "reference.csc.features": {
+      "source": "reference.csc",
+      "kind": "tree",
+      "format": "json",
+      "routes": [
+        {
+          "depot": {
+            "var": "reference.csc_root"
+          }
+        }
+      ],
+      "filter": {
+        "basename": "customer_carrier_feature_plain.json"
+      },
+      "when": {
+        "input": "check_csc_features"
+      }
+    },
+    "current.system.board_config": {
+      "source": "current.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_sssi/device/${current.common_device}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.system.bluetooth_header": {
+      "source": "current.system",
+      "kind": "file",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_sssi/device/${current.common_device}/Bluetooth/bdroid_buildcfg.h"
+        }
+      ],
+      "comparison": {
+        "include": false
+      }
+    },
+    "current.system.device_common": {
+      "source": "current.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_sssi/device/${current.common_device}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.system.sec_product": {
+      "source": "current.system",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_sssi/vendor/${current.common_device}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.system.root_init": {
+      "source": "current.system",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/ESSI/android/",
+          "relative": "system/core/rootdir/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "current.vendor.bluetooth_folder": {
+      "source": "current.vendor",
+      "kind": "tree",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/device/${current.common_device}/Bluetooth"
+        }
+      ]
+    },
+    "current.vendor.board_config": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/device/${current.common_device}/BoardConfigCommon.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.vendor.device_common": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/device/${current.common_device}/device_common.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.vendor.model_init": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/device/${current.common_device}/init.${current.model}.rc"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/device/${current.common_device}/init.model.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "current.vendor.sec_product": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/",
+          "relative": "${current.model}_vendor/vendor/${current.common_device}/SecProductFeature.common"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.vendor.root_init": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "init",
+      "routes": [
+        {
+          "anchor_regex": "/ESSI/android/",
+          "relative": "system/core/rootdir/init.rc"
+        }
+      ],
+      "comparison": {
+        "latest_scope": "file"
+      }
+    },
+    "current.vendor.manifest": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "xml",
+      "routes": [
+        {
+          "mapped_regex": "/EXYNOS[0-9]*/android/device/samsung/(?P<ap>[^/]+)/$",
+          "capture": "ap",
+          "allowed": {
+            "var": "current.ap_candidates"
+          },
+          "append": "manifest.xml"
+        },
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/android/",
+          "relative": "device/samsung/${current.ap}/manifest.xml"
+        }
+      ],
+      "comparison": {
+        "include": false,
+        "xml_identity": {
+          "hal": [
+            "name"
+          ]
+        }
+      }
+    },
+    "current.vendor.hcf_makefile": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "make",
+      "routes": [
+        {
+          "anchor_regex": "/vendor/samsung/hardware/vendor/",
+          "relative": "bluetooth/slsi/${current.chipset}/bluetooth.mk"
+        },
+        {
+          "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${current.chipset}/bluetooth.mk"
+        }
+      ],
+      "comparison": {
+        "list_variables": [
+          "PRODUCT_PACKAGES"
+        ]
+      }
+    },
+    "current.vendor.hcf": {
+      "source": "current.vendor",
+      "kind": "tree",
+      "format": "text",
+      "routes": [
+        {
+          "anchor_regex": "/vendor/samsung/hardware/vendor/",
+          "relative": "bluetooth/slsi/${current.chipset}"
+        },
+        {
+          "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${current.chipset}"
+        }
+      ],
+      "filter": {
+        "relative_regex": "^${current.model}[a-zA-Z0-9_-]*/"
+      }
+    },
+    "current.vendor.firmware": {
+      "source": "current.vendor",
+      "kind": "file",
+      "format": "binary",
+      "routes": [
+        {
+          "anchor_regex": "/EXYNOS[0-9]*/android/",
+          "relative": "vendor/samsung_slsi/mx140/firmware/${current.firmware}/mx140.bin"
+        }
+      ]
+    },
+    "current.csc.features": {
+      "source": "current.csc",
+      "kind": "tree",
+      "format": "json",
+      "routes": [
+        {
+          "depot": {
+            "var": "current.csc_root"
+          }
+        }
+      ],
+      "filter": {
+        "basename": "customer_carrier_feature_plain.json"
+      },
+      "when": {
+        "input": "check_csc_features"
+      }
+    }
   },
   "rules": [
     {
       "id": "system.header",
       "title": "Copy reference bdroid_buildcfg.h if absent",
       "source": "SLSI!B4",
-      "scope": "system",
-      "target": "bluetooth_header",
-      "kind": "copy_if_reference"
+      "steps": [
+        {
+          "from": {
+            "file": "reference.system.bluetooth_header"
+          },
+          "to": {
+            "file": "current.system.bluetooth_header"
+          },
+          "op": "file.copy_if_missing",
+          "pairing": {
+            "method": "view_relative",
+            "replacements": [
+              [
+                {
+                  "var": "reference.common_device"
+                },
+                {
+                  "var": "current.common_device"
+                }
+              ],
+              [
+                {
+                  "var": "reference.model"
+                },
+                {
+                  "var": "current.model"
+                }
+              ]
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip"
+          }
+        }
+      ]
     },
     {
       "id": "system.board",
       "title": "Copy reference system Bluetooth board settings",
       "source": "SLSI!B6:C6",
-      "scope": "system",
-      "target": "board_config",
-      "kind": "reference_make_settings",
-      "keys": [
-        "WLAN_VENDOR",
-        "WLAN_CHIP",
-        "BOARD_HAVE_BLUETOOTH",
-        "BOARD_HAVE_BLUETOOTH_SLSI",
-        "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
-        "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
-      ],
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
-      ],
-      "include_basenames": [
-        "BluetoothBoardConfigCommon.mk"
+      "steps": [
+        {
+          "op": "assert",
+          "condition": {
+            "any": [
+              {
+                "not": {
+                  "present": {
+                    "var": "reference.board_chip"
+                  }
+                }
+              },
+              {
+                "eq": [
+                  {
+                    "var": "reference.board_chip"
+                  },
+                  {
+                    "var": "current.chipset"
+                  }
+                ]
+              }
+            ]
+          },
+          "message": "Selected chipset differs from reference WLAN_CHIP; align the input before copying reference board settings"
+        },
+        {
+          "from": {
+            "file": "reference.system.board_config"
+          },
+          "to": {
+            "file": "current.system.board_config"
+          },
+          "op": "make.ensure",
+          "select": {
+            "assignment_names": [
+              "WLAN_VENDOR",
+              "WLAN_CHIP",
+              "BOARD_HAVE_BLUETOOTH",
+              "BOARD_HAVE_BLUETOOTH_SLSI",
+              "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
+              "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
+            ],
+            "assignment_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ],
+            "include_basenames": [
+              "BluetoothBoardConfigCommon.mk"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
+        }
       ]
     },
     {
       "id": "system.packages",
       "title": "System BluetoothAgent package",
       "source": "SLSI!B8",
-      "scope": "system",
-      "target": "device_common",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "make_packages",
-          "packages": [
-            "BluetoothAgent"
-          ],
-          "reference_package_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
-          ]
+          "from": {
+            "file": "reference.system.device_common"
+          },
+          "to": {
+            "file": "current.system.device_common"
+          },
+          "op": "make.packages",
+          "select": {
+            "variable": "PRODUCT_PACKAGES",
+            "names": [
+              "BluetoothAgent"
+            ],
+            "patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
         }
       ]
     },
@@ -85,47 +1169,109 @@
       "id": "system.features",
       "title": "Compare system Bluetooth product features with reference",
       "source": "SLSI!B10:C10",
-      "scope": "system",
-      "target": "sec_product",
-      "kind": "reference_features",
-      "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
-      ],
-      "format": "make"
+      "steps": [
+        {
+          "from": {
+            "file": "reference.system.sec_product"
+          },
+          "to": {
+            "file": "current.system.sec_product"
+          },
+          "op": "make.values",
+          "select": {
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+            "assignment_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ]
+          },
+          "operator": "=",
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "review",
+            "report_current_only": true
+          }
+        }
+      ]
     },
     {
       "id": "csc.features",
       "title": "Add missing customer_carrier_feature_plain.json files and keys across all regions",
       "source": "SLSI!C10",
-      "scope": "csc",
-      "target": "carrier_features",
-      "kind": "carrier_features",
-      "filename": "customer_carrier_feature_plain.json"
+      "when": {
+        "input": "check_csc_features"
+      },
+      "disabled_message": "CSC feature checks are disabled. Select Check CSC features to include them.",
+      "steps": [
+        {
+          "op": "json.merge_missing",
+          "from": {
+            "file": "reference.csc.features"
+          },
+          "to": {
+            "file": "current.csc.features"
+          },
+          "policy": {
+            "report_current_only": true
+          },
+          "inventory": {
+            "label": "CSC",
+            "markers": [
+              "customer.xml",
+              "omc.info"
+            ],
+            "filename_prefix": "customer_carrier_feature",
+            "parent_dirs": [
+              "system"
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "system.postfs",
       "title": "System post-fs-data Bluetooth permissions",
       "source": "SLSI!B12",
-      "scope": "system",
-      "target": "root_init",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "init_commands",
-          "event": "on post-fs-data",
-          "commands": [
-            "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
-            "chmod 0660 /data/misc/bluedroid/bt_config.conf",
-            "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
-            "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
-            "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
-          ],
-          "reference_command_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
-          ],
-          "reference_comment_patterns": [
-            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          "from": {
+            "file": "reference.system.root_init"
+          },
+          "to": {
+            "file": "current.system.root_init"
+          },
+          "op": "init.ensure",
+          "select": {
+            "event": "on post-fs-data",
+            "commands": [
+              "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
+              "chmod 0660 /data/misc/bluedroid/bt_config.conf",
+              "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
+              "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
+              "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
+            ],
+            "command_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+            ],
+            "comment_patterns": [
+              "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip",
+            "context_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdaddr|bt_addr|bt_config|btpower|scsc_bt|ssrdump|/data/log/bt|/dev/ttySAC\\d|\\bbt\\b)"
+            ]
+          },
+          "replacements": [
+            {
+              "old": "/mnt/vendor/efs",
+              "new": {
+                "var": "efs"
+              }
+            }
           ]
         }
       ]
@@ -134,35 +1280,56 @@
       "id": "system.boot",
       "title": "System boot Bluetooth paths and permissions",
       "source": "SLSI!B13:B14",
-      "scope": "system",
-      "target": "root_init",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "init_commands",
-          "event": "on boot",
-          "commands": [
-            "mkdir /data/log 0775 system log",
-            "mkdir /data/log/bt 0770 bluetooth bluetooth",
-            "chown bluetooth bluetooth /dev/ttySAC1",
-            "chmod 0660 /dev/ttySAC1",
-            "setprop ro.bt.bdaddr_path \"{efs}/bluetooth/bt_addr\"",
-            "chown bluetooth bluetooth ro.bt.bdaddr_path",
-            "mkdir {efs}/bluetooth 0770 system bluetooth",
-            "chown system bluetooth {efs}/bluetooth",
-            "chown system bluetooth {efs}/bluetooth/bt_addr",
-            "chmod 0770 {efs}/bluetooth",
-            "chmod 0660 {efs}/bluetooth/bt_addr",
-            "chmod 0660 /dev/btpower",
-            "chown bluetooth system /dev/btpower",
-            "mkdir /data/vendor/ssrdump 0770 root system",
-            "chown bluetooth log /proc/bluetooth/uart/log"
-          ],
-          "reference_command_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
-          ],
-          "reference_comment_patterns": [
-            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          "from": {
+            "file": "reference.system.root_init"
+          },
+          "to": {
+            "file": "current.system.root_init"
+          },
+          "op": "init.ensure",
+          "select": {
+            "event": "on boot",
+            "commands": [
+              "mkdir /data/log 0775 system log",
+              "mkdir /data/log/bt 0770 bluetooth bluetooth",
+              "chown bluetooth bluetooth /dev/ttySAC1",
+              "chmod 0660 /dev/ttySAC1",
+              "setprop ro.bt.bdaddr_path \"/mnt/vendor/efs/bluetooth/bt_addr\"",
+              "chown bluetooth bluetooth ro.bt.bdaddr_path",
+              "mkdir /mnt/vendor/efs/bluetooth 0770 system bluetooth",
+              "chown system bluetooth /mnt/vendor/efs/bluetooth",
+              "chown system bluetooth /mnt/vendor/efs/bluetooth/bt_addr",
+              "chmod 0770 /mnt/vendor/efs/bluetooth",
+              "chmod 0660 /mnt/vendor/efs/bluetooth/bt_addr",
+              "chmod 0660 /dev/btpower",
+              "chown bluetooth system /dev/btpower",
+              "mkdir /data/vendor/ssrdump 0770 root system",
+              "chown bluetooth log /proc/bluetooth/uart/log"
+            ],
+            "command_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+            ],
+            "comment_patterns": [
+              "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip",
+            "context_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdaddr|bt_addr|bt_config|btpower|scsc_bt|ssrdump|/data/log/bt|/dev/ttySAC\\d|\\bbt\\b)"
+            ]
+          },
+          "replacements": [
+            {
+              "old": "/mnt/vendor/efs",
+              "new": {
+                "var": "efs"
+              }
+            }
           ]
         }
       ]
@@ -171,63 +1338,147 @@
       "id": "vendor.bluetooth",
       "title": "Copy missing files from reference Bluetooth folder",
       "source": "SLSI!B18",
-      "scope": "vendor",
-      "target": "bluetooth_folder",
-      "kind": "copy_tree_if_reference"
+      "steps": [
+        {
+          "from": {
+            "file": "reference.vendor.bluetooth_folder"
+          },
+          "to": {
+            "file": "current.vendor.bluetooth_folder"
+          },
+          "op": "tree.copy_missing",
+          "pairing": {
+            "method": "view_relative",
+            "replacements": [
+              [
+                {
+                  "var": "reference.common_device"
+                },
+                {
+                  "var": "current.common_device"
+                }
+              ],
+              [
+                {
+                  "var": "reference.model"
+                },
+                {
+                  "var": "current.model"
+                }
+              ]
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip"
+          }
+        }
+      ]
     },
     {
       "id": "vendor.board",
       "title": "Copy reference vendor Bluetooth board settings",
       "source": "SLSI!B20",
-      "scope": "vendor",
-      "target": "board_config",
-      "kind": "reference_make_settings",
-      "keys": [
-        "BOARD_HAVE_BLUETOOTH",
-        "BOARD_HAVE_BLUETOOTH_SLSI",
-        "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
-        "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
-      ],
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
-      ],
-      "include_basenames": [
-        "BluetoothBoardConfigCommon.mk"
+      "steps": [
+        {
+          "from": {
+            "file": "reference.vendor.board_config"
+          },
+          "to": {
+            "file": "current.vendor.board_config"
+          },
+          "op": "make.ensure",
+          "select": {
+            "assignment_names": [
+              "BOARD_HAVE_BLUETOOTH",
+              "BOARD_HAVE_BLUETOOTH_SLSI",
+              "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR",
+              "BLUEDROID_HCI_VENDOR_STATIC_LINKING"
+            ],
+            "assignment_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ],
+            "include_basenames": [
+              "BluetoothBoardConfigCommon.mk"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
+        }
       ]
     },
     {
       "id": "vendor.packages",
       "title": "Vendor packages, includes and firmware family",
       "source": "SLSI!B22",
-      "scope": "vendor",
-      "target": "device_common",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "make_packages",
-          "packages": [
-            "libbt-vendor",
-            "android.hardware.bluetooth@1.1-impl",
-            "android.hardware.bluetooth@1.1-service"
-          ],
-          "reference_package_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
-          ]
+          "from": {
+            "file": "reference.vendor.device_common"
+          },
+          "to": {
+            "file": "current.vendor.device_common"
+          },
+          "op": "make.packages",
+          "select": {
+            "variable": "PRODUCT_PACKAGES",
+            "names": [
+              "libbt-vendor",
+              "android.hardware.bluetooth@1.1-impl",
+              "android.hardware.bluetooth@1.1-service"
+            ],
+            "patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
         },
         {
-          "type": "ensure_lines",
-          "lines": [
-            "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk",
-            "include vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"
-          ],
-          "reference_line_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
-          ]
+          "from": {
+            "file": "reference.vendor.device_common"
+          },
+          "to": {
+            "file": "current.vendor.device_common"
+          },
+          "op": "make.includes",
+          "select": {
+            "lines": [
+              "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk",
+              "include vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"
+            ],
+            "patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
         },
         {
-          "type": "assignments",
-          "values": {
-            "SLSI_WLBT_UNIFIED_FIRMWARE": "{firmware}"
+          "from": {
+            "file": "reference.vendor.device_common"
+          },
+          "to": {
+            "file": "current.vendor.device_common"
+          },
+          "op": "make.ensure",
+          "select": {
+            "assignment_names": [
+              "SLSI_WLBT_UNIFIED_FIRMWARE"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
           }
         }
       ]
@@ -236,40 +1487,85 @@
       "id": "vendor.init",
       "title": "Vendor model init permissions (JDM aware)",
       "source": "SLSI!B24:C24",
-      "scope": "vendor",
-      "target": "model_init",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "init_commands",
-          "event": "on init",
-          "commands": [
-            "chown bluetooth bluetooth /sys/module/scsc_bt/parameters/bluetooth_address"
-          ],
-          "reference_command_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
-          ],
-          "reference_comment_patterns": [
-            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          "from": {
+            "file": "reference.vendor.model_init"
+          },
+          "to": {
+            "file": "current.vendor.model_init"
+          },
+          "op": "init.ensure",
+          "select": {
+            "event": "on init",
+            "commands": [
+              "chown bluetooth bluetooth /sys/module/scsc_bt/parameters/bluetooth_address"
+            ],
+            "command_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+            ],
+            "comment_patterns": [
+              "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip",
+            "context_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdaddr|bt_addr|bt_config|btpower|scsc_bt|ssrdump|/data/log/bt|/dev/ttySAC\\d|\\bbt\\b)"
+            ]
+          },
+          "replacements": [
+            {
+              "old": "/mnt/vendor/efs",
+              "new": {
+                "var": "efs"
+              }
+            }
           ]
         },
         {
-          "type": "init_commands",
-          "event": "on post-fs-data",
-          "commands": [
-            "setprop ro.bt.bdaddr_path \"{efs}/bluetooth/bt_addr\"",
-            "chown bluetooth bluetooth ro.bt.bdaddr_path",
-            "mkdir {efs}/bluetooth 0770 system bluetooth",
-            "chown system bluetooth {efs}/bluetooth",
-            "chown system bluetooth {efs}/bluetooth/bt_addr",
-            "chmod 0770 {efs}/bluetooth",
-            "chmod 0660 {efs}/bluetooth/bt_addr"
-          ],
-          "reference_command_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
-          ],
-          "reference_comment_patterns": [
-            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          "from": {
+            "file": "reference.vendor.model_init"
+          },
+          "to": {
+            "file": "current.vendor.model_init"
+          },
+          "op": "init.ensure",
+          "select": {
+            "event": "on post-fs-data",
+            "commands": [
+              "setprop ro.bt.bdaddr_path \"/mnt/vendor/efs/bluetooth/bt_addr\"",
+              "chown bluetooth bluetooth ro.bt.bdaddr_path",
+              "mkdir /mnt/vendor/efs/bluetooth 0770 system bluetooth",
+              "chown system bluetooth /mnt/vendor/efs/bluetooth",
+              "chown system bluetooth /mnt/vendor/efs/bluetooth/bt_addr",
+              "chmod 0770 /mnt/vendor/efs/bluetooth",
+              "chmod 0660 /mnt/vendor/efs/bluetooth/bt_addr"
+            ],
+            "command_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+            ],
+            "comment_patterns": [
+              "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip",
+            "context_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdaddr|bt_addr|bt_config|btpower|scsc_bt|ssrdump|/data/log/bt|/dev/ttySAC\\d|\\bbt\\b)"
+            ]
+          },
+          "replacements": [
+            {
+              "old": "/mnt/vendor/efs",
+              "new": {
+                "var": "efs"
+              }
+            }
           ]
         }
       ]
@@ -278,38 +1574,75 @@
       "id": "vendor.features",
       "title": "Compare vendor Bluetooth product features with reference",
       "source": "SLSI!B26",
-      "scope": "vendor",
-      "target": "sec_product",
-      "kind": "reference_features",
-      "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
-      "key_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
-      ],
-      "format": "make"
+      "steps": [
+        {
+          "from": {
+            "file": "reference.vendor.sec_product"
+          },
+          "to": {
+            "file": "current.vendor.sec_product"
+          },
+          "op": "make.values",
+          "select": {
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+            "assignment_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ]
+          },
+          "operator": "=",
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "review",
+            "report_current_only": true
+          }
+        }
+      ]
     },
     {
       "id": "vendor.postfs",
       "title": "Vendor-template system root init permissions",
       "source": "SLSI!B28",
-      "scope": "vendor",
-      "target": "root_init",
-      "kind": "transform",
-      "actions": [
+      "steps": [
         {
-          "type": "init_commands",
-          "event": "on post-fs-data",
-          "commands": [
-            "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
-            "chmod 0660 /data/misc/bluedroid/bt_config.conf",
-            "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
-            "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
-            "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
-          ],
-          "reference_command_patterns": [
-            "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
-          ],
-          "reference_comment_patterns": [
-            "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+          "from": {
+            "file": "reference.vendor.root_init"
+          },
+          "to": {
+            "file": "current.vendor.root_init"
+          },
+          "op": "init.ensure",
+          "select": {
+            "event": "on post-fs-data",
+            "commands": [
+              "mkdir /data/misc/bluedroid 02770 bluetooth bluetooth",
+              "chmod 0660 /data/misc/bluedroid/bt_config.conf",
+              "chown bluetooth bluetooth /data/misc/bluedroid/bt_config.conf",
+              "mkdir /data/misc/bluetooth 0770 bluetooth bluetooth",
+              "mkdir /data/misc/bluetooth/logs 0770 bluetooth bluetooth"
+            ],
+            "command_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|bt_config|bdaddr|btpower|scsc_bt|(?:^|[./_-])bt(?:[./_-]|$)|/proc/bluetooth|ssrdump)"
+            ],
+            "comment_patterns": [
+              "(?i)(?:\\bbluetooth\\b|\\bbluedroid\\b|\\bbt\\b|\\ba2dp\\b)"
+            ]
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip",
+            "context_patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdaddr|bt_addr|bt_config|btpower|scsc_bt|ssrdump|/data/log/bt|/dev/ttySAC\\d|\\bbt\\b)"
+            ]
+          },
+          "replacements": [
+            {
+              "old": "/mnt/vendor/efs",
+              "new": {
+                "var": "efs"
+              }
+            }
           ]
         }
       ]
@@ -318,22 +1651,60 @@
       "id": "vendor.hals",
       "title": "Verify reference Bluetooth HIDL/AIDL entries",
       "source": "SLSI!B30:C30",
-      "scope": "vendor",
-      "target": "manifest",
-      "kind": "verify_hals",
-      "name_patterns": [
-        "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[._-])bt(?:[._-]|$)|a2dp)"
-      ],
-      "expected_hals": [
+      "steps": [
         {
-          "name": "android.hardware.bluetooth",
-          "version": "1.0",
-          "interface": "IBluetoothHci"
-        },
-        {
-          "name": "vendor.samsung.hardware.bluetooth",
-          "version": "2.0",
-          "interface": "ISehBluetooth"
+          "from": {
+            "file": "reference.vendor.manifest"
+          },
+          "to": {
+            "file": "current.vendor.manifest"
+          },
+          "op": "xml.verify",
+          "select": {
+            "path": ".//hal",
+            "name_path": "name",
+            "names": [
+              "android.hardware.bluetooth",
+              "vendor.samsung.hardware.bluetooth"
+            ],
+            "patterns": [
+              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[._-])bt(?:[._-]|$)|a2dp)"
+            ]
+          },
+          "identity": [
+            "name"
+          ],
+          "fields": [
+            {
+              "path": "@format",
+              "compare": "equal"
+            },
+            {
+              "path": "transport",
+              "compare": "equal"
+            },
+            {
+              "path": "version",
+              "compare": "minimum_version"
+            },
+            {
+              "path": "interface",
+              "compare": "subset",
+              "tuple": [
+                "name",
+                "instance"
+              ]
+            },
+            {
+              "path": "fqname",
+              "compare": "subset"
+            }
+          ],
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          }
         }
       ]
     },
@@ -341,26 +1712,159 @@
       "id": "vendor.hcf",
       "title": "Verify HCF files and TARGET_PRODUCT copy filter",
       "source": "SLSI!B32",
-      "scope": "vendor",
-      "target": "hcf",
-      "kind": "verify_hcf"
+      "steps": [
+        {
+          "op": "block.sync",
+          "from": {
+            "file": "reference.vendor.hcf_makefile"
+          },
+          "to": {
+            "file": "current.vendor.hcf_makefile"
+          },
+          "policy": {
+            "on_source_missing": "skip",
+            "on_empty_selection": "skip"
+          },
+          "block": {
+            "pattern": "(?ms)^\\s*ifneq\\s*\\(\\s*\\$\\(filter\\s+(?P<products>[^,]+),\\s*\\$\\(TARGET_PRODUCT\\)\\s*\\)\\s*,\\s*\\)(?P<body>.*?)^\\s*endif\\b[^\\r\\n]*",
+            "reject_pattern": "\\b(?:ifeq|ifneq|ifdef|ifndef)\\b",
+            "body_group": "body",
+            "captures": {
+              "variant": "\\$\\(HCF_PATH\\)/([A-Za-z0-9_.-]+)"
+            },
+            "contains": [
+              "$(TARGET_COPY_OUT_VENDOR)/firmware/wifi",
+              "PRODUCT_COPY_FILES",
+              "find-copy-subdir-files"
+            ],
+            "split": [
+              "products"
+            ],
+            "include_preceding_comment": true,
+            "identity": "variant",
+            "compare": [
+              "products"
+            ],
+            "unrecognized_marker": "$(HCF_PATH)/{variant}"
+          },
+          "choose": {
+            "field": "variant",
+            "input": {
+              "input": "hcf_variant"
+            },
+            "prefix": {
+              "var": "reference.model"
+            },
+            "single_fallback": true,
+            "export": {
+              "variant": "hcf_variant",
+              "products": "products"
+            },
+            "required_members": {
+              "input": "products"
+            },
+            "members_field": "products"
+          },
+          "related": {
+            "reference": "reference.vendor.hcf",
+            "current": "current.vendor.hcf",
+            "suffix": ".hcf",
+            "snapshot": true
+          }
+        }
+      ]
     },
     {
       "id": "vendor.firmware",
       "title": "Verify mapped firmware path exists",
       "source": "SLSI!B34:C34",
-      "scope": "vendor",
-      "target": "firmware",
-      "kind": "verify_firmware"
+      "steps": [
+        {
+          "op": "file.exists",
+          "to": {
+            "file": "current.vendor.firmware"
+          },
+          "assert_path": {
+            "template": "/firmware/${current.firmware}/"
+          },
+          "message": {
+            "template": "Mapped current firmware path exists for ${current.chipset} \u2192 ${current.firmware}."
+          },
+          "policy": {
+            "on_missing": "review"
+          }
+        }
+      ]
     },
     {
       "id": "device.validation",
       "title": "After build: verify phone Bluetooth address and firmware",
       "source": "SLSI!B36",
-      "scope": "device",
-      "target": "phone",
-      "kind": "manual",
-      "notes": "Compare the phone BT address with {efs}/bluetooth/bt_addr. Check BT firmware with *#2663#. Requires a built device."
+      "steps": [
+        {
+          "op": "manual",
+          "message": {
+            "template": "Compare the phone BT address with ${efs}/bluetooth/bt_addr. Check BT firmware with *#2663#. Requires a built device."
+          }
+        }
+      ]
+    },
+    {
+      "id": "sheet.review",
+      "title": "Review checklist interpretation",
+      "source": "SLSI!B13,B24,B28,C10",
+      "steps": [
+        {
+          "op": "manual",
+          "status": "review",
+          "message": "Checklist settings and command values are selection hints; only matching reference content is used. B28 selects the reference post-fs-data event. Explicit JDM selection maps EFS paths to /efs. Product features follow the reference OS; review model and regional eligibility against the Feature Flags tab before approving. Sample TRUE/FALSE feature values are not forced across models."
+        }
+      ]
+    }
+  ],
+  "report": {
+    "title": "SLSI Bluetooth delta plan",
+    "changelist": "SLSI Bluetooth delta for ${current.model}"
+  },
+  "comparison": {
+    "exclude": [
+      {
+        "basename": "bdroid_buildcfg.h",
+        "reason": "bdroid_buildcfg.h is excluded from changelist comparison; its normal copy-if-absent rule and tab 4 preview are unchanged."
+      },
+      {
+        "basename": "customer_carrier_feature_plain.json",
+        "when": {
+          "not": {
+            "input": "check_csc_features"
+          }
+        },
+        "reason": "CSC feature checks are disabled; customer_carrier_feature_plain.json changelist entries are excluded."
+      }
+    ]
+  },
+  "preconditions": [
+    {
+      "condition": {
+        "any": [
+          {
+            "not": {
+              "present": {
+                "var": "reference.vendor"
+              }
+            }
+          },
+          {
+            "eq": [
+              {
+                "var": "reference.vendor"
+              },
+              "8"
+            ]
+          }
+        ]
+      },
+      "message": "Reference WLAN_VENDOR is not SLSI (8)"
     }
   ]
 }
