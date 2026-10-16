@@ -33,7 +33,7 @@
 <text x="58" y="603" font-family="sans-serif" font-size="14" fill="#354d69">Failed rule rolls back its own edits</text>
 <rect x="40" y="655" width="460" height="100" rx="10" fill="white" stroke="#b7c7da"/>
 <text x="58" y="684" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Sealed normal plan</text>
-<text x="58" y="709" font-family="sans-serif" font-size="14" fill="#354d69">Tab 3 compact review + Tab 8 detailed reasons</text>
+<text x="58" y="709" font-family="sans-serif" font-size="14" fill="#354d69">Review tab; detailed reasons saved to disk</text>
 <text x="58" y="731" font-family="sans-serif" font-size="14" fill="#354d69">plan.json / plan.txt / exact proposed diffs</text>
 <rect x="40" y="795" width="460" height="100" rx="10" fill="white" stroke="#b7c7da"/>
 <text x="58" y="824" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Review to approved execution</text>
@@ -43,14 +43,14 @@
 <text x="583" y="534" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Inspection previews + requirements</text>
 <text x="583" y="559" font-family="sans-serif" font-size="14" fill="#354d69">Same interpreter; blank.py mode</text>
 <text x="583" y="581" font-family="sans-serif" font-size="14" fill="#354d69">Blank mode does not read target content</text>
-<text x="583" y="603" font-family="sans-serif" font-size="14" fill="#354d69">Tab 4; previews cannot be applied</text>
+<text x="583" y="603" font-family="sans-serif" font-size="14" fill="#354d69">Saved previews; cannot be applied</text>
 <rect x="565" y="655" width="460" height="100" rx="10" fill="white" stroke="#b7c7da"/>
 <text x="583" y="684" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Read-only changelist comparison</text>
 <text x="583" y="709" font-family="sans-serif" font-size="14" fill="#354d69">Selected edits + latest exact depot revisions</text>
 <text x="583" y="731" font-family="sans-serif" font-size="14" fill="#354d69">Additions, removals, extra changes and errors</text>
 <rect x="565" y="795" width="460" height="100" rx="10" fill="white" stroke="#b7c7da"/>
 <text x="583" y="824" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Comparison reports</text>
-<text x="583" y="849" font-family="sans-serif" font-size="14" fill="#354d69">Tab 6 inputs to Tab 7 results</text>
+<text x="583" y="849" font-family="sans-serif" font-size="14" fill="#354d69">Optional comparisons; reports saved to disk</text>
 <text x="583" y="871" font-family="sans-serif" font-size="14" fill="#354d69">comparison.json / comparison.txt</text>
 <rect x="565" y="235" width="460" height="235" rx="10" fill="white" stroke="#b7c7da"/>
 <text x="583" y="264" font-family="sans-serif" font-size="18" font-weight="bold" fill="#162b46">Perforce adapter</text>

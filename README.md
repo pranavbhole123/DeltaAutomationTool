@@ -24,13 +24,13 @@ python main.py
 # Or double-click start.bat on Windows.
 ```
 
-1. In **1. Project inputs**, select a JSON pack or use **Browse**. Fields come from that file. Drop additional packs into `checklist/` and click **Reload** to refresh the picker, or browse to a JSON anywhere.
-2. In **2. Perforce**, enter server, user and workspace. Authenticate separately with your normal `p4 login`; passwords are not requested or stored.
+1. In **1. Inputs**, select a JSON pack or use **Browse**. Fields come from that file. Drop additional packs into `checklist/` and click **Reload** to refresh the picker, or browse to a JSON anywhere.
+2. In the **Perforce** section of the same Inputs tab, enter server, user and workspace. Authenticate separately with your normal `p4 login`; passwords are not requested or stored.
 3. **Generate plan** performs read-only inspection. It records exact revisions, content and proposed diffs locally.
-4. **3. Review & approve** shows statuses, reference/current filenames and proposed edits. **8. Detailed report** contains the full reasons and evidence, including unresolved checks. Read both before applying.
+4. **2. Review & approve** shows statuses, reference/current filenames and proposed edits. Full reasons and evidence, including unresolved checks, are saved in `plan.txt` alongside the plan.
 5. Apply the reviewed plan to a dedicated **pending changelist**. The tool never automatically shelves or submits. The execution journal records the changelist and per-file progress.
 
-**4. Empty-file preview** shows selected reference/literal content even when the current file already matches. It is inspection material, not another set of edits to apply. **5. Live log** shows discovery, derived inputs and Perforce requests. **6. Changelist comparison** contains comparison controls; **7. Comparison results** displays the full report.
+The GUI contains only Inputs and Review & approve. Empty-file previews, detailed reports and runtime diagnostics are saved to disk. Comparison reports are also saved without displaying them. The offline demo is available only through the CLI.
 
 Changing inputs or the loaded JSON invalidates approval. A JSON changed on disk must be reloaded. An invalid selected pack reports an error; it does not silently run the SLSI pack instead.
 
@@ -64,7 +64,18 @@ Plans save `plan.json`, `plan.txt` (detailed reasons and diffs), and `empty-file
 
 ## Changelist comparison
 
-Comparison reuses the displayed preview only when its rules and inputs still match; otherwise it regenerates the preview. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
+Run the CLI `compare` command to save a comparison, or include this optional setting in loaded inputs to save one automatically when generating a GUI plan:
+
+```json
+"comparison": {
+  "changelists": ["123456", "123457"],
+  "source": "auto"
+}
+```
+
+With no changelist numbers configured, the GUI saves only the plan, previews and detailed report. A configured comparison saves `comparison.json`, `comparison.txt` and its blank baseline in the same report folder; none are displayed in the GUI. If that optional comparison fails, the plan is still saved and its folder contains `comparison-error.txt`. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
+
+Comparison reuses saved plan previews only when their rules and inputs still match; otherwise it regenerates the preview. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
 
 | Result | Meaning |
 | --- | --- |

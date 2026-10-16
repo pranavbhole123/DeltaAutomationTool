@@ -1,4 +1,4 @@
-"""Send the same discovery evidence to the saved log and live GUI log."""
+"""Save discovery evidence to the log and notify optional progress observers."""
 import logging
 
 

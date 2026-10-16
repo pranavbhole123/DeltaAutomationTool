@@ -1,4 +1,4 @@
-"""Small desktop front end. All Perforce work runs outside the UI thread."""
+"""Compact desktop front end. Reports stay on disk; Perforce work uses a worker."""
 
 from __future__ import annotations
 
@@ -14,26 +14,48 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from .config import validate
 from .spec import DEFAULT_SPEC, load_spec, get_value, set_value
-from .comparison import (
-    compare_changelist,
-    comparison_summary,
-    parse_changelists,
-    save_comparison,
-)
-from .demo import demo_plan
+from .comparison import compare_changelist, parse_changelists, save_comparison
 from .executor import execute
 from .perforce import P4CLI
-from .planner import (
-    Planner,
-    canonical,
-    compact_summary,
-    digest,
-    preview_summary,
-    save_plan,
-    summary,
-)
+from .planner import Planner, canonical, compact_summary, digest, save_plan
 
 BASE = Path(__file__).resolve().parent.parent
+
+
+def generate_reports(config):
+    """Save the plan and optional CL comparison without displaying report contents."""
+    options = config.get("comparison", {})
+    if not isinstance(options, dict):
+        raise ValueError("comparison must be an object in the saved inputs")
+    numbers = (
+        parse_changelists(options["changelists"]) if options.get("changelists") else []
+    )
+    source = options.get("source", "auto")
+    if source not in ("auto", "submitted", "shelved", "workspace"):
+        raise ValueError("Unsupported changelist content source")
+    p4 = P4CLI(config["perforce"])
+    plan = Planner(p4, config).build()
+    folder = (
+        BASE
+        / "reports"
+        / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + plan["digest"][:8])
+    )
+    output = save_plan(plan, folder)
+    report_error = False
+    if numbers:
+        try:
+            comparison = compare_changelist(
+                p4, config, numbers, source=source, preview_plan=plan
+            )
+            save_comparison(comparison, folder)
+        except Exception as exc:
+            # An optional report must not discard the successfully saved review plan.
+            logging.exception("Saved changelist comparison failed")
+            (folder / "comparison-error.txt").write_text(
+                str(exc) + "\n", encoding="utf-8"
+            )
+            report_error = True
+    return {"plan": plan, "path": output, "report_error": report_error}
 
 
 def review_line_tag(line):
@@ -49,7 +71,7 @@ def review_line_tag(line):
 
 class App(ttk.Frame):
     def __init__(self, root):
-        super().__init__(root, padding=18)
+        super().__init__(root, padding=16)
         self.pack(fill="both", expand=True)
         self.root, self.plan, self.plan_path = root, None, None
         self.busy = False
@@ -57,64 +79,31 @@ class App(ttk.Frame):
         self.values = {}
         self.approved = tk.BooleanVar(value=False)
         self.status = tk.StringVar(
-            value="Enter project details, then generate a read-only plan."
+            value="Enter project and Perforce details, then generate a plan."
         )
         ttk.Label(self, text="Delta Automation", font=("Segoe UI", 20, "bold")).pack(
             anchor="w"
         )
-        ttk.Label(
-            self,
-            text="Template views → checklist checks → file diffs → your approval → pending changelist",
-        ).pack(anchor="w", pady=(2, 12))
         toolbar = ttk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 10))
+        toolbar.pack(fill="x", pady=(10, 12))
         for label, command in (
             ("Load inputs", self.load_config),
             ("Save inputs", self.save_config),
-            ("Offline demo", self.demo),
         ):
             ttk.Button(toolbar, text=label, command=command).pack(
                 side="left", padx=(0, 8)
             )
         self.plan_button = ttk.Button(
-            toolbar, text="Generate plan (read-only)", command=self.generate
+            toolbar, text="Generate plan", command=self.generate
         )
         self.plan_button.pack(side="right")
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True)
-        self.templates = ttk.Frame(self.tabs, padding=14)
-        self.settings = ttk.Frame(self.tabs, padding=14)
-        self.review = ttk.Frame(self.tabs, padding=10)
-        self.preview = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.templates, text="1. Project inputs")
-        self.tabs.add(self.settings, text="2. Perforce")
-        self.tabs.add(self.review, text="3. Review & approve")
-        self.tabs.add(self.preview, text="4. Empty-file preview")
-        self.log_tab = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.log_tab, text="5. Live log")
-        self.comparison_tab = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.comparison_tab, text="6. Changelist comparison")
-        self.comparison_results_tab = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.comparison_results_tab, text="7. Comparison results")
-        self.detail_tab = ttk.Frame(self.tabs, padding=10)
-        self.tabs.add(self.detail_tab, text="8. Detailed report")
-        self.detail_box = scrolledtext.ScrolledText(
-            self.detail_tab, wrap="none", font=("Consolas", 10), state="disabled"
-        )
-        self.detail_box.pack(fill="both", expand=True)
-        self.changelist = tk.StringVar()
-        self.comparison_source = tk.StringVar(value="auto")
-        self.comparison_status = tk.StringVar(
-            value="Enter developer changelists to compare with tab 4 Empty-file preview."
-        )
-        self.changelist.trace_add("write", lambda *_: self.invalidate_comparison())
-        self.comparison_source.trace_add(
-            "write", lambda *_: self.invalidate_comparison()
-        )
-        self.log_box = scrolledtext.ScrolledText(
-            self.log_tab, wrap="word", font=("Consolas", 10), state="disabled"
-        )
-        self.log_box.pack(fill="both", expand=True)
+        self.templates = ttk.Frame(self.tabs, padding=12)
+        self.review = ttk.Frame(self.tabs, padding=12)
+        self.tabs.add(self.templates, text="1. Inputs")
+        self.tabs.add(self.review, text="2. Review & approve")
+
         self.rules_path = tk.StringVar(value=str(DEFAULT_SPEC))
         self.rules_title = tk.StringVar()
         chooser = ttk.Frame(self.templates)
@@ -139,6 +128,7 @@ class App(ttk.Frame):
         ttk.Label(self.templates, textvariable=self.rules_title).pack(
             anchor="w", pady=(0, 8)
         )
+
         container = ttk.Frame(self.templates)
         container.pack(fill="both", expand=True)
         canvas = tk.Canvas(container, highlightthickness=0)
@@ -146,59 +136,65 @@ class App(ttk.Frame):
         canvas.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
-        self.input_form = ttk.Frame(canvas)
-        window = canvas.create_window((0, 0), window=self.input_form, anchor="nw")
-        self.input_form.bind(
+        form = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=form, anchor="nw")
+        form.bind(
             "<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.bind(
             "<Configure>", lambda event: canvas.itemconfigure(window, width=event.width)
         )
+
+        self.settings = ttk.LabelFrame(form, text="Perforce", padding=10)
+        self.settings.pack(fill="x", pady=(0, 10))
+        self.settings.columnconfigure(1, weight=1)
+        for i, (key, label) in enumerate(
+            [
+                ("perforce.port", "Server (P4PORT)"),
+                ("perforce.user", "User"),
+                ("perforce.client", "Writable workspace"),
+                ("perforce.executable", "p4 executable"),
+            ]
+        ):
+            self.entry(self.settings, key, label, i, width=48)
+        ttk.Label(self.settings, text="Uses your existing p4 login ticket.").grid(
+            row=4, column=1, sticky="w", pady=(3, 0)
+        )
+        self.input_form = ttk.LabelFrame(form, text="Project", padding=10)
+        self.input_form.pack(fill="x", pady=(0, 10))
         self.input_form.columnconfigure(1, weight=1)
-        ttk.Label(
-            self.templates,
-            text="Optional exact depot overrides: JSON object keyed by file IDs from the selected rules file.",
-        ).pack(anchor="w", pady=(10, 4))
+        overrides_frame = ttk.Frame(form)
+        overrides_frame.pack(fill="x", pady=(0, 6))
+        ttk.Label(overrides_frame, text="Exact depot paths (optional JSON)").pack(
+            anchor="w", pady=(0, 4)
+        )
         self.overrides = scrolledtext.ScrolledText(
-            self.templates, height=4, font=("Consolas", 10)
+            overrides_frame, height=2, font=("Consolas", 10), wrap="none"
         )
         self.overrides.pack(fill="x")
         self.overrides.bind("<<Modified>>", self.modified)
-        self.settings.columnconfigure(1, weight=1)
-        labels = [
-            ("perforce.port", "Perforce server (P4PORT)"),
-            ("perforce.user", "Perforce user"),
-            ("perforce.client", "Existing writable workspace"),
-            ("perforce.executable", "p4 executable"),
-        ]
-        for i, (key, label) in enumerate(labels):
-            self.entry(self.settings, key, label, i)
-        ttk.Label(
-            self.settings,
-            text="Uses your existing p4 login ticket. Passwords are never requested or saved.",
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
+
         self.summary_box = scrolledtext.ScrolledText(
             self.review, wrap="none", font=("Consolas", 10), state="disabled"
         )
         self.summary_box.pack(fill="both", expand=True)
-        self.summary_box.tag_configure(
-            "diff_add", foreground="#146c2e", background="#e6f4ea"
-        )
-        self.summary_box.tag_configure(
-            "diff_delete", foreground="#b3261e", background="#fce8e6"
-        )
-        self.summary_box.tag_configure(
-            "diff_hunk", foreground="#075985", background="#e0f2fe"
-        )
+        for tag, foreground, background in (
+            ("diff_add", "#146c2e", "#e6f4ea"),
+            ("diff_delete", "#b3261e", "#fce8e6"),
+            ("diff_hunk", "#075985", "#e0f2fe"),
+        ):
+            self.summary_box.tag_configure(
+                tag, foreground=foreground, background=background
+            )
         ttk.Checkbutton(
             self.review,
-            text="I reviewed the proposed edits and REVIEW/BLOCKED reasons in Detailed report. BLOCKED items stay untouched.",
+            text="I reviewed these edits and the saved report. BLOCKED items stay untouched.",
             variable=self.approved,
             command=self.update_apply,
         ).pack(anchor="w", pady=(10, 5))
         self.apply_button = ttk.Button(
             self.review,
-            text="Apply reviewed changes to pending changelist",
+            text="Apply to pending changelist",
             command=self.apply,
             state="disabled",
         )
@@ -206,11 +202,6 @@ class App(ttk.Frame):
         ttk.Label(self, textvariable=self.status, wraplength=1050).pack(
             anchor="w", pady=(10, 0)
         )
-        self.preview_box = scrolledtext.ScrolledText(
-            self.preview, wrap="none", font=("Consolas", 10), state="disabled"
-        )
-        self.preview_box.pack(fill="both", expand=True)
-        self.build_comparison_tab()
         self.set_config(
             {"rules_file": str(DEFAULT_SPEC), "perforce": {"executable": "p4"}}
         )
@@ -234,169 +225,8 @@ class App(ttk.Frame):
 
     def invalidate(self):
         self.approved.set(False)
-        self.invalidate_comparison()
         if hasattr(self, "apply_button"):
             self.apply_button.configure(state="disabled")
-
-    def invalidate_comparison(self):
-        if getattr(self, "comparison_report", None):
-            self.comparison_status.set(
-                "Inputs changed. Generate a fresh comparison; the displayed report uses the previous inputs."
-            )
-
-    def build_comparison_tab(self):
-        ttk.Label(self.comparison_tab, textvariable=self.rules_title).pack(
-            anchor="w", pady=4
-        )
-        ttk.Label(
-            self.comparison_tab,
-            text="Uses the selected rules file and project inputs from tab 1, and the Perforce connection from tab 2.",
-            wraplength=1000,
-        ).pack(anchor="w", pady=4)
-        controls = ttk.Frame(self.comparison_tab)
-        controls.pack(fill="x", pady=6)
-        controls.columnconfigure(1, weight=1)
-        ttk.Label(controls, text="Developer changelists").grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Entry(controls, textvariable=self.changelist, width=45).grid(
-            row=0, column=1, columnspan=3, sticky="ew", padx=8
-        )
-        ttk.Label(controls, text="Content source").grid(
-            row=1, column=0, sticky="w", pady=6
-        )
-        ttk.Combobox(
-            controls,
-            textvariable=self.comparison_source,
-            state="readonly",
-            width=13,
-            values=("auto", "submitted", "shelved", "workspace"),
-        ).grid(row=1, column=1, sticky="w", padx=8)
-        self.compare_button = ttk.Button(
-            controls, text="Compare with Empty-file preview", command=self.compare
-        )
-        self.compare_button.grid(row=1, column=3, sticky="e", padx=8)
-        ttk.Label(
-            self.comparison_tab,
-            text="Enter numbers separated by commas or spaces, e.g. 123456, 123457, 123458. Uses tab 4 previews, including files that already match. If no current preview exists, generates it and displays it in tab 4.",
-            wraplength=1000,
-        ).pack(anchor="w", pady=(0, 4))
-        ttk.Label(
-            self.comparison_tab,
-            text="Each file shows tool suggestions, developer before/after edits, combined changelist changes and detailed mismatch reasons. Auto uses submitted content, then a shelf, then local workspace content. Unshelved files require the developer's configured local workspace.",
-            wraplength=1000,
-        ).pack(anchor="w", pady=(0, 4))
-        ttk.Label(
-            self.comparison_tab, textvariable=self.comparison_status, wraplength=1000
-        ).pack(anchor="w", pady=(0, 6))
-        ttk.Label(
-            self.comparison_tab,
-            text="Results open in tab 7. Suggestions absent from the selected edits are checked against the latest depot revision before being marked missing. Exclusions and presence checks follow the selected rules file.",
-            wraplength=1000,
-        ).pack(anchor="w", pady=6)
-        ttk.Button(
-            self.comparison_tab,
-            text="View comparison results",
-            command=lambda: self.tabs.select(self.comparison_results_tab),
-        ).pack(anchor="w")
-        ttk.Label(
-            self.comparison_results_tab,
-            textvariable=self.comparison_status,
-            wraplength=1000,
-        ).pack(anchor="w", pady=(0, 6))
-        ttk.Button(
-            self.comparison_results_tab,
-            text="Back to comparison inputs",
-            command=lambda: self.tabs.select(self.comparison_tab),
-        ).pack(anchor="w", pady=(0, 6))
-        horizontal = ttk.Scrollbar(self.comparison_results_tab, orient="horizontal")
-        horizontal.pack(side="bottom", fill="x")
-        self.comparison_box = scrolledtext.ScrolledText(
-            self.comparison_results_tab,
-            wrap="none",
-            font=("Consolas", 10),
-            state="disabled",
-            xscrollcommand=horizontal.set,
-        )
-        horizontal.configure(command=self.comparison_box.xview)
-        self.comparison_box.pack(fill="both", expand=True)
-        for tag, foreground, background in (
-            ("diff_add", "#146c2e", "#e6f4ea"),
-            ("diff_delete", "#b3261e", "#fce8e6"),
-            ("diff_hunk", "#075985", "#e0f2fe"),
-        ):
-            self.comparison_box.tag_configure(
-                tag, foreground=foreground, background=background
-            )
-
-    def compare(self):
-        if self.busy:
-            return
-        try:
-            config = self.get_config()
-            numbers, source = (
-                parse_changelists(self.changelist.get()),
-                self.comparison_source.get(),
-            )
-            preview_plan = copy.deepcopy(getattr(self, "preview_plan", None))
-            if getattr(self, "preview_input_hash", None) != digest(canonical(config)):
-                preview_plan = None
-            captured = digest(
-                canonical({"config": config, "numbers": numbers, "source": source})
-            )
-
-            def complete(report):
-                self.comparison_report = report
-                folder = (
-                    BASE
-                    / "reports"
-                    / (
-                        datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                        + "-compare-"
-                        + report["changelists"][0]["number"]
-                    )
-                )
-                output = save_comparison(report, folder)
-                self.show_previews(report["plan"])
-                self.preview_input_hash = digest(canonical(config))
-                self.comparison_box.configure(state="normal")
-                self.comparison_box.delete("1.0", "end")
-                for line in comparison_summary(report).splitlines(keepends=True):
-                    self.comparison_box.insert("end", line, review_line_tag(line) or ())
-                self.comparison_box.configure(state="disabled")
-                self.tabs.select(self.comparison_results_tab)
-                self.comparison_status.set(
-                    f"{'Incomplete comparison' if report['incomplete'] else 'Comparison saved'}: {output}"
-                )
-                try:
-                    current = digest(
-                        canonical(
-                            {
-                                "config": self.get_config(),
-                                "numbers": parse_changelists(self.changelist.get()),
-                                "source": self.comparison_source.get(),
-                            }
-                        )
-                    )
-                except Exception:
-                    current = None
-                if current != captured:
-                    self.invalidate_comparison()
-                self.status.set(f"Read-only changelist comparison saved to {output}")
-
-            self.run(
-                lambda: compare_changelist(
-                    P4CLI(config["perforce"], progress=self.progress),
-                    config,
-                    numbers,
-                    source=source,
-                    preview_plan=preview_plan,
-                ),
-                complete,
-                "Comparing tab 4 previews with selected edits and checking latest depot content for uncovered suggestions.",
-            )
-        except Exception as exc:
-            messagebox.showerror("Changelist comparison", str(exc))
 
     def choose_rules(self):
         if self.busy:
@@ -432,6 +262,8 @@ class App(ttk.Frame):
                 "perforce": config.get("perforce", {}),
                 "paths": config.get("paths", {}) if old == path else {},
             }
+            if old == path and "comparison" in config:
+                fresh["comparison"] = config["comparison"]
             for key in spec["inputs"]:
                 value = get_value(config, key)
                 if value is not None:
@@ -514,8 +346,6 @@ class App(ttk.Frame):
             )
             variable.set(", ".join(value) if isinstance(value, list) else value)
         self.invalidate()
-        self.preview_plan = None
-        self.preview_input_hash = None
         self.overrides.delete("1.0", "end")
         self.overrides.insert("1.0", json.dumps(config.get("paths", {}), indent=2))
 
@@ -577,10 +407,8 @@ class App(ttk.Frame):
             return
         self.busy = True
         self.plan_button.configure(state="disabled")
-        self.compare_button.configure(state="disabled")
         self.apply_button.configure(state="disabled")
         self.status.set(message)
-        self.tabs.select(self.log_tab)
 
         def worker():
             try:
@@ -595,19 +423,10 @@ class App(ttk.Frame):
         try:
             for _ in range(100):
                 completed, result, error = self.events.get_nowait()
-                if completed is None:
-                    self.log_box.configure(state="normal")
-                    self.log_box.insert("end", result + "\n")
-                    self.log_box.see("end")
-                    self.log_box.configure(state="disabled")
-                    self.status.set(result)
-                    continue
                 self.busy = False
                 self.plan_button.configure(state="normal")
-                self.compare_button.configure(state="normal")
                 if error:
-                    self.progress("ERROR: " + error)
-                    self.status.set(error)
+                    self.status.set("Operation failed. See runtime.log for details.")
                     messagebox.showerror("Delta Automation", error)
                 else:
                     completed(result)
@@ -618,70 +437,41 @@ class App(ttk.Frame):
             logging.exception("GUI result handling failed")
             self.busy = False
             self.plan_button.configure(state="normal")
-            self.compare_button.configure(state="normal")
-            self.status.set("ERROR: " + str(exc))
+            self.status.set("Operation failed. See runtime.log for details.")
         finally:
             self.root.after(100, self.poll)
 
-    def progress(self, message):
-        self.events.put(
-            (None, datetime.now().strftime("%H:%M:%S") + " " + message, None)
-        )
-
-    def show_plan(self, plan):
-        self.plan = plan
-        folder = (
-            BASE
-            / "reports"
-            / (datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + plan["digest"][:8])
-        )
-        self.plan_path = save_plan(plan, folder)
+    def show_plan(self, result):
+        self.plan, self.plan_path = result["plan"], result["path"]
         self.summary_box.configure(state="normal")
         self.summary_box.delete("1.0", "end")
-        for line in compact_summary(plan).splitlines(keepends=True):
-            tag = review_line_tag(line)
-            self.summary_box.insert("end", line, tag if tag else ())
+        for line in compact_summary(self.plan).splitlines(keepends=True):
+            self.summary_box.insert("end", line, review_line_tag(line) or ())
         self.summary_box.configure(state="disabled")
-        self.detail_box.configure(state="normal")
-        self.detail_box.delete("1.0", "end")
-        self.detail_box.insert("1.0", summary(plan))
-        self.detail_box.configure(state="disabled")
-        self.show_previews(plan)
-        self.preview_input_hash = self.input_hash
         self.approved.set(False)
         self.tabs.select(self.review)
+        suffix = (
+            " Some optional reports failed; see the saved folder."
+            if result["report_error"]
+            else ""
+        )
         self.status.set(
-            f"Plan saved to {self.plan_path}. Full reasons: Detailed report tab and plan.txt."
+            f"Plan ready. Reports saved in {self.plan_path.parent}.{suffix}"
         )
 
-    def show_previews(self, plan):
-        self.preview_plan = copy.deepcopy(plan)
-        self.preview_box.configure(state="normal")
-        self.preview_box.delete("1.0", "end")
-        self.preview_box.insert("1.0", preview_summary(plan))
-        self.preview_box.configure(state="disabled")
-
     def generate(self):
+        if self.busy:
+            return
         try:
             config = self.get_config()
             self.input_hash = digest(canonical(config))
             self.run(
-                lambda: Planner(
-                    P4CLI(config["perforce"], progress=self.progress), config
-                ).build(),
+                lambda: generate_reports(config),
                 self.show_plan,
-                "Reading template views and checklist files. No Perforce changes are being made.",
+                "Generating plan and saving reports…",
             )
         except Exception as exc:
             messagebox.showerror("Inputs", str(exc))
-
-    def demo(self):
-        self.input_hash = None
-        self.run(
-            lambda: demo_plan(BASE / "reports" / "demo"),
-            self.show_plan,
-            "Building a synthetic offline demonstration.",
-        )
 
     def update_apply(self):
         allowed = (
@@ -718,20 +508,16 @@ class App(ttk.Frame):
             )
             blocked = result.get("blocked", [])
             if blocked:
-                details = "\n\n".join(
-                    f"• {item['title']} ({item['source']})\n  {item['message']}"
-                    for item in blocked
-                )
                 messagebox.showwarning(
                     "Applied changes; blocked work remains",
-                    f"{change_text}\n\nThe following checks were not changed and still require manual work:\n\n{details}",
+                    f"{change_text}\n\n{len(blocked)} blocked check(s) were left untouched. Details are saved in plan.txt and the execution journal.",
                 )
             else:
                 messagebox.showinfo("Pending changelist", self.status.get())
 
         self.run(
             lambda: execute(
-                P4CLI(plan["connection"], progress=self.progress),
+                P4CLI(plan["connection"]),
                 plan,
                 plan["digest"],
                 acknowledge_reviews=True,
@@ -746,8 +532,8 @@ class App(ttk.Frame):
 def launch():
     root = tk.Tk()
     root.title("Delta Automation")
-    root.geometry("1180x840")
-    root.minsize(920, 720)
+    root.geometry("1120x820")
+    root.minsize(900, 680)
     style = ttk.Style(root)
     if "clam" in style.theme_names():
         style.theme_use("clam")

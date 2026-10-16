@@ -8,16 +8,16 @@ The selected JSON owns file paths, selectors, domain constants, inference and co
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
-| Entry and inputs | `main.py`, `cli.py`, `gui.py`, `config.py` | Load selected pack; build dynamic fields; validate saved inputs. GUI workers report through an event queue. |
+| Entry and inputs | `main.py`, `cli.py`, `gui.py`, `config.py` | Load selected pack; build dynamic fields; validate saved inputs. The GUI has Inputs and Review & approve tabs. Workers report completion through an event queue; detailed reports and logs stay on disk. |
 | Specification | `spec.py`, `schema.py`, `expressions.py` | Validate schema 2 and references/cycles; evaluate explicit expressions without executing code. |
 | Discovery | `resolver.py`, `perforce.py` | Bind declared sources to Views/depot roots; enforce mapping coverage; distinguish unmapped from queried-but-absent. |
 | Content utilities | `operations.py`, `reference.py`, `transforms.py`, `json_ops.py` | Select and edit Make, init, XML, JSON and text; retain unrelated content; surface ambiguity. |
 | Planning | `planner.py` | Read revision snapshots, execute ordered steps, accumulate per-file edits and requirements; roll back a failed rule. Seal the resulting plan. |
 | Blank preview | `blank.py` + same planner | Produce inspection content without reading target contents. It cannot be applied. Normal plans also record source previews. |
-| Comparison | `comparison.py`, `comparison_report.py` | Attribute selected CL edits; check latest exact paths for uncovered additions/removals; produce reasons and evidence. |
+| Comparison | `comparison.py`, `comparison_report.py` | Attribute selected CL edits; check latest exact paths for uncovered additions/removals; save reasons and evidence to reports. |
 | Execution | `executor.py` | Validate approved digest, connection, Views, snapshots and local state; write exact bytes to a pending CL and journal progress. |
 
-The normal plan contains exact before/after bytes, revisions, source/input metadata, reasons and diffs. Pack changes invalidate cached previews and GUI approval. The executor applies the reviewed plan's bytes; it does not reinterpret current JSON rules during application.
+The normal plan contains exact before/after bytes, revisions, source/input metadata, reasons and diffs. Pack changes invalidate GUI approval. Optional changelist comparisons use loaded-input settings and save their results without opening a report view. The executor applies the reviewed plan's bytes; it does not reinterpret current JSON rules during application.
 
 Rules may share a target file. Later operations see earlier proposed content; the final edit is compared against the original snapshot. A failed rule restores its previous edits/requirements. Unresolved checks remain visible while independent rules may still complete.
 
