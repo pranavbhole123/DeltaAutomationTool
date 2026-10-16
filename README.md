@@ -64,7 +64,7 @@ Plans save `plan.json`, `plan.txt` (detailed reasons and diffs), and `empty-file
 
 ## Changelist comparison
 
-Run the CLI `compare` command to save a comparison, or include this optional setting in loaded inputs to save one automatically when generating a GUI plan:
+In **1. Inputs → Perforce**, enter one or more numbers in **Changelists (optional)**, separated by commas or spaces. **Generate plan** saves the comparison in the report folder without displaying its contents. Leave the box empty to skip comparison. The CLI `compare` command is also available. Saved inputs retain the numbers and may specify a content source:
 
 ```json
 "comparison": {
@@ -73,7 +73,7 @@ Run the CLI `compare` command to save a comparison, or include this optional set
 }
 ```
 
-With no changelist numbers configured, the GUI saves only the plan, previews and detailed report. A configured comparison saves `comparison.json`, `comparison.txt` and its blank baseline in the same report folder; none are displayed in the GUI. If that optional comparison fails, the plan is still saved and its folder contains `comparison-error.txt`. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
+With the changelist box empty, the GUI saves only the plan, previews and detailed report. A configured comparison saves `comparison.json`, `comparison.txt` and its blank baseline in the same report folder; none are displayed in the GUI. If that optional comparison fails, the plan is still saved and its folder contains `comparison-error.txt`. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
 
 Comparison reuses saved plan previews only when their rules and inputs still match; otherwise it regenerates the preview. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
 

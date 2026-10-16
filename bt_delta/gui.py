@@ -157,8 +157,21 @@ class App(ttk.Frame):
             ]
         ):
             self.entry(self.settings, key, label, i, width=48)
+        self.changelist = tk.StringVar()
+        self.changelist.trace_add("write", lambda *_: self.invalidate())
+        ttk.Label(self.settings, text="Changelists (optional)").grid(
+            row=4, column=0, sticky="w", padx=(0, 14), pady=4
+        )
+        self.changelist_entry = ttk.Entry(
+            self.settings, textvariable=self.changelist, width=48
+        )
+        self.changelist_entry.grid(row=4, column=1, sticky="ew", pady=4)
+        ttk.Label(
+            self.settings,
+            text="Comma or space separated. Comparison results are saved with the reports.",
+        ).grid(row=5, column=1, sticky="w", pady=(0, 3))
         ttk.Label(self.settings, text="Uses your existing p4 login ticket.").grid(
-            row=4, column=1, sticky="w", pady=(3, 0)
+            row=6, column=1, sticky="w", pady=(3, 0)
         )
         self.input_form = ttk.LabelFrame(form, text="Project", padding=10)
         self.input_form.pack(fill="x", pady=(0, 10))
@@ -281,6 +294,9 @@ class App(ttk.Frame):
             self.values[key].set(path)
 
     def set_config(self, config, *, spec=None):
+        comparison = config.get("comparison", {})
+        if not isinstance(comparison, dict):
+            raise ValueError("comparison must be an object in the saved inputs")
         path = str(
             Path(config.get("rules_file") or DEFAULT_SPEC).expanduser().resolve()
         )
@@ -290,6 +306,12 @@ class App(ttk.Frame):
         self.rules_title.set(spec["title"] + "  ·  schema 2")
         self.extra_config = copy.deepcopy(config)
         self.extra_config["rules_file"] = path
+        numbers = comparison.get("changelists", "")
+        self.changelist.set(
+            ", ".join(str(n) for n in numbers)
+            if isinstance(numbers, list)
+            else str(numbers or "")
+        )
         for child in self.input_form.winfo_children():
             child.destroy()
         self.values = {
@@ -360,6 +382,21 @@ class App(ttk.Frame):
                 value = [v for v in value.replace(",", " ").split() if v]
             set_value(result, key, value)
         result["paths"] = json.loads(self.overrides.get("1.0", "end").strip() or "{}")
+        comparison = result.get("comparison", {}).copy()
+        numbers = self.changelist.get().strip()
+        if numbers:
+            try:
+                comparison["changelists"] = parse_changelists(numbers)
+            except ValueError:
+                if checked:
+                    raise
+                comparison["changelists"] = numbers
+        else:
+            comparison.pop("changelists", None)
+        if comparison:
+            result["comparison"] = comparison
+        else:
+            result.pop("comparison", None)
         if checked:
             fresh_spec = load_spec(result["rules_file"])
             if fresh_spec != self.catalog:

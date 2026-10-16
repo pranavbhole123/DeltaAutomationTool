@@ -39,6 +39,9 @@ class DynamicFormTests(unittest.TestCase):
             [self.app.tabs.tab(tab, "text") for tab in self.app.tabs.tabs()],
         )
         self.assertTrue(str(self.app.settings).startswith(str(self.app.templates)))
+        self.assertTrue(
+            str(self.app.changelist_entry).startswith(str(self.app.templates))
+        )
         self.assertEqual(2, int(self.app.overrides["height"]))
         for removed in (
             "preview_box",
@@ -99,7 +102,11 @@ class DynamicFormTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             p4, config = fixture(Path(directory) / "workspace")
-            config["comparison"] = {"changelists": ["100"], "source": "submitted"}
+            config["comparison"] = {"source": "submitted"}
+            self.app.set_config(config)
+            self.app.changelist.set("100, 100")
+            config = self.app.get_config()
+            self.assertEqual(["100"], config["comparison"]["changelists"])
             p4.__class__ = HistoryP4
             p4.history = {(p, row[0]): row[1] for p, row in p4.data.items()}
             p4.reads, p4.unreadable = [], set()
@@ -218,7 +225,7 @@ class DynamicFormTests(unittest.TestCase):
             self.assertFalse(self.app.approved.get())
             self.assertEqual("camera-example", self.app.catalog["id"])
 
-    def test_saved_hidden_input_and_list_round_trip(self):
+    def test_saved_advanced_inputs_and_changelist_round_trip(self):
         config = {
             "rules_file": str(ROOT / "checklist/slsi.json"),
             "ap": "erd8825",
@@ -233,7 +240,17 @@ class DynamicFormTests(unittest.TestCase):
         self.assertEqual("erd8825", saved["ap"])
         self.assertEqual(config["products"], saved["products"])
         self.assertIs(True, saved["jdm"])
+        self.assertEqual("100", self.app.changelist.get())
         self.app.select_rules()
         self.assertEqual(
             config["comparison"], self.app.get_config(checked=False)["comparison"]
         )
+        self.app.changelist.set("")
+        self.assertNotIn("comparison", self.app.get_config(checked=False))
+
+    def test_changelist_edit_invalidates_approval_and_rejects_invalid_numbers(self):
+        self.app.approved.set(True)
+        self.app.changelist.set("123, invalid")
+        self.assertFalse(self.app.approved.get())
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            self.app.get_config()

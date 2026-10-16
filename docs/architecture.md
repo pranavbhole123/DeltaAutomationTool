@@ -17,7 +17,7 @@ The selected JSON owns file paths, selectors, domain constants, inference and co
 | Comparison | `comparison.py`, `comparison_report.py` | Attribute selected CL edits; check latest exact paths for uncovered additions/removals; save reasons and evidence to reports. |
 | Execution | `executor.py` | Validate approved digest, connection, Views, snapshots and local state; write exact bytes to a pending CL and journal progress. |
 
-The normal plan contains exact before/after bytes, revisions, source/input metadata, reasons and diffs. Pack changes invalidate GUI approval. Optional changelist comparisons use loaded-input settings and save their results without opening a report view. The executor applies the reviewed plan's bytes; it does not reinterpret current JSON rules during application.
+The normal plan contains exact before/after bytes, revisions, source/input metadata, reasons and diffs. Pack changes invalidate GUI approval. Optional changelist comparisons use the Inputs tab field or loaded-input settings and save their results without opening a report view. The executor applies the reviewed plan's bytes; it does not reinterpret current JSON rules during application.
 
 Rules may share a target file. Later operations see earlier proposed content; the final edit is compared against the original snapshot. A failed rule restores its previous edits/requirements. Unresolved checks remain visible while independent rules may still complete.
 
