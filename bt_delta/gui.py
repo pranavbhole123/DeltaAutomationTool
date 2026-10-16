@@ -23,39 +23,29 @@ BASE = Path(__file__).resolve().parent.parent
 
 
 def generate_reports(config):
-    """Save the plan and optional CL comparison without displaying report contents."""
-    options = config.get("comparison", {})
-    if not isinstance(options, dict):
-        raise ValueError("comparison must be an object in the saved inputs")
-    numbers = (
-        parse_changelists(options["changelists"]) if options.get("changelists") else []
-    )
-    source = options.get("source", "auto")
-    if source not in ("auto", "submitted", "shelved", "workspace"):
-        raise ValueError("Unsupported changelist content source")
-    p4 = P4CLI(config["perforce"])
-    plan = Planner(p4, config).build()
+    """Save a normal review plan and its detailed reports."""
+    plan = Planner(P4CLI(config["perforce"]), config).build()
     folder = (
         BASE
         / "reports"
         / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + plan["digest"][:8])
     )
-    output = save_plan(plan, folder)
-    report_error = False
-    if numbers:
-        try:
-            comparison = compare_changelist(
-                p4, config, numbers, source=source, preview_plan=plan
-            )
-            save_comparison(comparison, folder)
-        except Exception as exc:
-            # An optional report must not discard the successfully saved review plan.
-            logging.exception("Saved changelist comparison failed")
-            (folder / "comparison-error.txt").write_text(
-                str(exc) + "\n", encoding="utf-8"
-            )
-            report_error = True
-    return {"plan": plan, "path": output, "report_error": report_error}
+    return {"plan": plan, "path": save_plan(plan, folder)}
+
+
+def save_checklist_comparison(config):
+    """Run the independent read-only comparison and save its complete report."""
+    options = config.get("comparison", {})
+    numbers = parse_changelists(options.get("changelists", []))
+    report = compare_changelist(
+        P4CLI(config["perforce"]), config, numbers, source=options.get("source", "auto")
+    )
+    folder = (
+        BASE
+        / "reports"
+        / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-compare-" + numbers[0])
+    )
+    return save_comparison(report, folder)
 
 
 def review_line_tag(line):
@@ -166,12 +156,18 @@ class App(ttk.Frame):
             self.settings, textvariable=self.changelist, width=48
         )
         self.changelist_entry.grid(row=4, column=1, sticky="ew", pady=4)
+        self.compare_button = ttk.Button(
+            self.settings,
+            text="Check checklist differences",
+            command=self.check_differences,
+        )
+        self.compare_button.grid(row=5, column=1, sticky="w", pady=(4, 4))
         ttk.Label(
             self.settings,
-            text="Comma or space separated. Comparison results are saved with the reports.",
-        ).grid(row=5, column=1, sticky="w", pady=(0, 3))
+            text="Comma or space separated. Results are saved to disk.",
+        ).grid(row=6, column=1, sticky="w", pady=(0, 3))
         ttk.Label(self.settings, text="Uses your existing p4 login ticket.").grid(
-            row=6, column=1, sticky="w", pady=(3, 0)
+            row=7, column=1, sticky="w", pady=(3, 0)
         )
         self.input_form = ttk.LabelFrame(form, text="Project", padding=10)
         self.input_form.pack(fill="x", pady=(0, 10))
@@ -444,6 +440,7 @@ class App(ttk.Frame):
             return
         self.busy = True
         self.plan_button.configure(state="disabled")
+        self.compare_button.configure(state="disabled")
         self.apply_button.configure(state="disabled")
         self.status.set(message)
 
@@ -462,6 +459,7 @@ class App(ttk.Frame):
                 completed, result, error = self.events.get_nowait()
                 self.busy = False
                 self.plan_button.configure(state="normal")
+                self.compare_button.configure(state="normal")
                 if error:
                     self.status.set("Operation failed. See runtime.log for details.")
                     messagebox.showerror("Delta Automation", error)
@@ -474,6 +472,7 @@ class App(ttk.Frame):
             logging.exception("GUI result handling failed")
             self.busy = False
             self.plan_button.configure(state="normal")
+            self.compare_button.configure(state="normal")
             self.status.set("Operation failed. See runtime.log for details.")
         finally:
             self.root.after(100, self.poll)
@@ -487,14 +486,23 @@ class App(ttk.Frame):
         self.summary_box.configure(state="disabled")
         self.approved.set(False)
         self.tabs.select(self.review)
-        suffix = (
-            " Some optional reports failed; see the saved folder."
-            if result["report_error"]
-            else ""
-        )
-        self.status.set(
-            f"Plan ready. Reports saved in {self.plan_path.parent}.{suffix}"
-        )
+        self.status.set(f"Plan ready. Reports saved in {self.plan_path.parent}.")
+
+    def check_differences(self):
+        if self.busy:
+            return
+        try:
+            config = self.get_config()
+            parse_changelists(config.get("comparison", {}).get("changelists", []))
+            self.run(
+                lambda: save_checklist_comparison(config),
+                lambda output: self.status.set(
+                    f"Checklist comparison saved to {output}"
+                ),
+                "Checking checklist differences and saving the report…",
+            )
+        except Exception as exc:
+            messagebox.showerror("Checklist comparison", str(exc))
 
     def generate(self):
         if self.busy:

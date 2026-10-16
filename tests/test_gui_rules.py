@@ -42,6 +42,7 @@ class DynamicFormTests(unittest.TestCase):
         self.assertTrue(
             str(self.app.changelist_entry).startswith(str(self.app.templates))
         )
+        self.assertEqual("Check checklist differences", self.app.compare_button["text"])
         self.assertEqual(2, int(self.app.overrides["height"]))
         for removed in (
             "preview_box",
@@ -120,47 +121,61 @@ class DynamicFormTests(unittest.TestCase):
                 }
             }
             p4.change_files = {"100": []}
+            retained_plan = {"mode": "live"}
+            self.app.plan = retained_plan
+            retained_path = Path(directory) / "existing-plan.json"
+            self.app.plan_path = retained_path
+            self.app.tabs.select(self.app.templates)
+
+            def run_now(work, completed, message):
+                completed(work())
+
             with patch("bt_delta.gui.BASE", Path(directory)), patch(
                 "bt_delta.gui.P4CLI", return_value=p4
-            ):
-                result = generate_reports(config)
-            self.assertFalse(result["report_error"])
-            folder = result["path"].parent
+            ), patch.object(self.app, "run", side_effect=run_now):
+                self.app.check_differences()
+            folder = next((Path(directory) / "reports").iterdir())
             self.assertTrue((folder / "comparison.txt").is_file())
             self.assertTrue((folder / "comparison.json").is_file())
             self.assertTrue(
                 (folder / "blank-plan" / "empty-file-previews.txt").is_file()
             )
-            self.app.show_plan(result)
+            self.assertIs(retained_plan, self.app.plan)
+            self.assertEqual(retained_path, self.app.plan_path)
+            self.assertEqual(str(self.app.templates), self.app.tabs.select())
             self.assertEqual(2, len(self.app.tabs.tabs()))
             self.assertNotIn(
                 "SELECTED CHANGELISTS", self.app.summary_box.get("1.0", "end")
             )
+            self.assertIn("comparison.txt", self.app.status.get())
             self.assertFalse(p4.calls)
 
-    def test_optional_comparison_failure_keeps_saved_review_plan(self):
+    def test_generate_plan_does_not_run_changelist_comparison(self):
         from bt_delta.demo import fixture
 
         with tempfile.TemporaryDirectory() as directory:
             p4, config = fixture(Path(directory) / "workspace")
-            config["comparison"] = {"changelists": "100"}
+            config["comparison"] = {"changelists": ["100"]}
             with patch("bt_delta.gui.BASE", Path(directory)), patch(
                 "bt_delta.gui.P4CLI", return_value=p4
-            ), patch(
-                "bt_delta.gui.compare_changelist",
-                side_effect=ValueError("Detailed comparison failure"),
-            ), self.assertLogs(
-                level="ERROR"
-            ):
+            ), patch("bt_delta.gui.compare_changelist") as compare:
                 result = generate_reports(config)
-            self.assertTrue(result["report_error"])
+            compare.assert_not_called()
             verify_seal(json.loads(result["path"].read_text()))
-            self.assertIn(
-                "Detailed comparison failure",
-                result["path"].with_name("comparison-error.txt").read_text(),
-            )
-            self.app.show_plan(result)
-            self.assertNotIn("Detailed comparison failure", self.app.status.get())
+            self.assertFalse(result["path"].with_name("comparison.txt").exists())
+
+    def test_difference_button_requires_changelists_before_starting_work(self):
+        from bt_delta.demo import fixture
+
+        with tempfile.TemporaryDirectory() as directory:
+            _, config = fixture(directory)
+            self.app.set_config(config)
+            with patch.object(self.app, "run") as run, patch(
+                "bt_delta.gui.messagebox.showerror"
+            ) as error:
+                self.app.check_differences()
+            run.assert_not_called()
+            self.assertIn("numbered developer changelist", error.call_args.args[1])
 
     def test_background_work_keeps_active_tab_and_does_not_stream_logs(self):
         import threading

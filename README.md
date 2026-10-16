@@ -64,7 +64,7 @@ Plans save `plan.json`, `plan.txt` (detailed reasons and diffs), and `empty-file
 
 ## Changelist comparison
 
-In **1. Inputs → Perforce**, enter one or more numbers in **Changelists (optional)**, separated by commas or spaces. **Generate plan** saves the comparison in the report folder without displaying its contents. Leave the box empty to skip comparison. The CLI `compare` command is also available. Saved inputs retain the numbers and may specify a content source:
+In **1. Inputs → Perforce**, enter one or more numbers in **Changelists (optional)**, separated by commas or spaces. **Check checklist differences** runs this separate read-only check and saves the report without displaying its contents. **Generate plan** creates the normal review/apply plan. Leave the box empty to skip comparison. The CLI `compare` command is also available. Saved inputs retain the numbers and may specify a content source:
 
 ```json
 "comparison": {
@@ -73,9 +73,9 @@ In **1. Inputs → Perforce**, enter one or more numbers in **Changelists (optio
 }
 ```
 
-With the changelist box empty, the GUI saves only the plan, previews and detailed report. A configured comparison saves `comparison.json`, `comparison.txt` and its blank baseline in the same report folder; none are displayed in the GUI. If that optional comparison fails, the plan is still saved and its folder contains `comparison-error.txt`. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
+The comparison button requires at least one changelist number. Generating a plan saves the plan, previews and detailed report independently. The comparison button saves `comparison.json`, `comparison.txt` and its blank baseline in a separate comparison report folder; none are displayed in the GUI. It does not replace the current review/apply plan. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
 
-Comparison reuses saved plan previews only when their rules and inputs still match; otherwise it regenerates the preview. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
+The comparison button generates fresh empty-file previews from the selected rules and reference templates. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
 
 | Result | Meaning |
 | --- | --- |
