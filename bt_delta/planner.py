@@ -1163,6 +1163,15 @@ def summary(plan):
         "Resolved inputs: "
         + json.dumps(plan.get("variables", plan.get("config", {})), ensure_ascii=False)
     )
+    selection = plan.get("review_selection")
+    if selection:
+        lines.extend(["", "Reviewer selection from plan: " + selection["source_plan_digest"],
+                      "Check results below describe the original generated plan; rules were not rerun after selection.",
+                      "Only the selected diffs in this plan will be applied."])
+        for file in selection["files"]:
+            lines.append(file["path"])
+            for key, label in (("included", "INCLUDE"), ("excluded", "EXCLUDE")):
+                lines.extend(f"  {label} [{item['id']}]: {item['label']}" for item in file[key])
     for check in plan["checks"]:
         lines.extend(
             [
@@ -1221,6 +1230,9 @@ def compact_summary(plan):
         return roles
 
     lines = []
+    if plan.get("review_selection"):
+        lines.extend(["Only checked edits are included below.",
+                      "Check statuses describe the original plan; selection does not rerun the checks.", ""])
     for check in plan["checks"]:
         lines.append(
             f"[{check['status'].upper()}] {check['title']} ({check['source']})"

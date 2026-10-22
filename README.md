@@ -27,8 +27,12 @@ python main.py
 1. In **1. Inputs**, select a JSON pack or use **Browse**. Fields come from that file. Drop additional packs into `checklist/` and click **Reload** to refresh the picker, or browse to a JSON anywhere.
 2. In the **Perforce** section of the same Inputs tab, enter server, user and workspace. Authenticate separately with your normal `p4 login`; passwords are not requested or stored.
 3. **Generate plan** performs read-only inspection. It records exact revisions, content and proposed diffs locally.
-4. **2. Review & approve** shows statuses, reference/current filenames and proposed edits. Full reasons and evidence, including unresolved checks, are saved in `plan.txt` alongside the plan.
-5. Apply the reviewed plan to a dedicated **pending changelist**. The tool never automatically shelves or submits. The execution journal records the changelist and per-file progress.
+4. **2. Review & approve** shows statuses, reference/current filenames and proposed edits. Use the file checkboxes to include or exclude entire files. Use the checkboxes under each file to choose individual flags/statements or sections; all edits start checked. The diff updates to show only the selected edits. Full reasons and evidence, including unresolved checks, are saved in `plan.txt` alongside the plan.
+5. Approve the checked edits and apply them to a dedicated **pending changelist**. Changing any selection clears approval. With nothing selected, Apply is disabled. The tool never automatically shelves or submits. The execution journal records the changelist and per-file progress.
+
+Independent Make flags can be selected individually. Continued Make assignments and complete conditional blocks stay together; init changes are selected by complete event/service section. XML, JSON, binary and other text formats use whole-file selection, as do Make files containing unsupported constructs. Unchecking a replacement keeps the original content, including the old flag value. Selections do not rerun rules or resolve dependencies between flags or files; check statuses describe the original generated plan.
+
+The original plan is retained. Apply saves the exact selected plan, diffs and inclusion/exclusion record under `selected-<digest>/` inside that plan's report directory, with its own execution journal. Revision, workspace and approval checks still run before any Perforce writes. The selected `plan.json` also works with the CLI `apply` command.
 
 The GUI contains only Inputs and Review & approve. Empty-file previews, detailed reports and runtime diagnostics are saved to disk. Comparison reports are also saved without displaying them. The offline demo is available only through the CLI.
 

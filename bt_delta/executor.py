@@ -158,6 +158,8 @@ def execute(p4, plan, approval, *, acknowledge_reviews=False, acknowledge_blocke
     journal = {"plan": plan["digest"], "status": "preflight_passed", "change": None, "files": [],
                "blocked": blocked, "started_at": datetime.now(timezone.utc).isoformat(),
                "acknowledged_reviews": acknowledge_reviews, "acknowledged_blocked": acknowledge_blocked}
+    if plan.get("review_selection"):
+        journal["review_selection"] = plan["review_selection"]
     def save():
         journal_path.write_text(json.dumps(journal, indent=2), encoding="utf-8")
     save()

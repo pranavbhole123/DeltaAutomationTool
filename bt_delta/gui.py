@@ -18,6 +18,7 @@ from .comparison import compare_changelist, parse_changelists, save_comparison
 from .executor import execute
 from .perforce import P4CLI
 from .planner import Planner, canonical, compact_summary, digest, save_plan
+from .selection import ReviewSelection
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -64,6 +65,10 @@ class App(ttk.Frame):
         super().__init__(root, padding=16)
         self.pack(fill="both", expand=True)
         self.root, self.plan, self.plan_path = root, None, None
+        self.selection, self.review_plan = None, None
+        self.file_choices, self.edit_choices, self.choice_widgets = {}, {}, []
+        self.file_widgets = {}
+        self.refreshing_selection = False
         self.busy = False
         self.events = queue.Queue()
         self.values = {}
@@ -183,10 +188,40 @@ class App(ttk.Frame):
         self.overrides.pack(fill="x")
         self.overrides.bind("<<Modified>>", self.modified)
 
+        review_panes = ttk.Panedwindow(self.review, orient="horizontal")
+        review_panes.pack(fill="both", expand=True)
+        selection_pane = ttk.Frame(review_panes, width=340)
+        diff_pane = ttk.Frame(review_panes)
+        review_panes.add(selection_pane, weight=1)
+        review_panes.add(diff_pane, weight=3)
+        ttk.Label(selection_pane, text="Include in pending changelist", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(selection_pane, text="Select files, flags or sections. Connected syntax stays together.", wraplength=310).pack(anchor="w", pady=(4, 8))
+        selection_toolbar = ttk.Frame(selection_pane)
+        selection_toolbar.pack(fill="x")
+        for label, value in (("Select all", True), ("Clear all", False)):
+            button = ttk.Button(selection_toolbar, text=label, command=lambda value=value: self.select_all_edits(value), state="disabled")
+            button.pack(side="left", padx=(0, 5))
+            self.choice_widgets.append(button)
+        self.selection_count = tk.StringVar(value="Generate a plan to choose edits.")
+        ttk.Label(selection_pane, textvariable=self.selection_count, wraplength=310).pack(anchor="w", pady=8)
+        choice_container = ttk.Frame(selection_pane)
+        choice_container.pack(fill="both", expand=True)
+        self.choice_canvas = tk.Canvas(choice_container, highlightthickness=0, width=320)
+        choice_scroll = ttk.Scrollbar(choice_container, orient="vertical", command=self.choice_canvas.yview)
+        self.choice_canvas.configure(yscrollcommand=choice_scroll.set)
+        choice_scroll.pack(side="right", fill="y")
+        self.choice_canvas.pack(side="left", fill="both", expand=True)
+        self.choice_form = ttk.Frame(self.choice_canvas)
+        choice_window = self.choice_canvas.create_window((0, 0), window=self.choice_form, anchor="nw")
+        self.choice_form.bind("<Configure>", lambda _: self.choice_canvas.configure(scrollregion=self.choice_canvas.bbox("all")))
+        self.choice_canvas.bind("<Configure>", lambda event: self.choice_canvas.itemconfigure(choice_window, width=event.width))
         self.summary_box = scrolledtext.ScrolledText(
-            self.review, wrap="none", font=("Consolas", 10), state="disabled"
+            diff_pane, wrap="none", font=("Consolas", 10), state="disabled"
         )
         self.summary_box.pack(fill="both", expand=True)
+        diff_scroll = ttk.Scrollbar(diff_pane, orient="horizontal", command=self.summary_box.xview)
+        self.summary_box.configure(xscrollcommand=diff_scroll.set)
+        diff_scroll.pack(fill="x")
         for tag, foreground, background in (
             ("diff_add", "#146c2e", "#e6f4ea"),
             ("diff_delete", "#b3261e", "#fce8e6"),
@@ -195,12 +230,13 @@ class App(ttk.Frame):
             self.summary_box.tag_configure(
                 tag, foreground=foreground, background=background
             )
-        ttk.Checkbutton(
+        self.approval_checkbox = ttk.Checkbutton(
             self.review,
-            text="I reviewed these edits and the saved report. BLOCKED items stay untouched.",
+            text="I approve the checked edits shown here and reviewed the saved report. BLOCKED items stay untouched.",
             variable=self.approved,
             command=self.update_apply,
-        ).pack(anchor="w", pady=(10, 5))
+        )
+        self.approval_checkbox.pack(anchor="w", pady=(10, 5))
         self.apply_button = ttk.Button(
             self.review,
             text="Apply to pending changelist",
@@ -442,6 +478,8 @@ class App(ttk.Frame):
         self.plan_button.configure(state="disabled")
         self.compare_button.configure(state="disabled")
         self.apply_button.configure(state="disabled")
+        self.set_selection_enabled(False)
+        self.approval_checkbox.configure(state="disabled")
         self.status.set(message)
 
         def worker():
@@ -475,18 +513,107 @@ class App(ttk.Frame):
             self.compare_button.configure(state="normal")
             self.status.set("Operation failed. See runtime.log for details.")
         finally:
+            if not self.busy:
+                self.set_selection_enabled(self.selection is not None and self.plan is not None)
+                self.approval_checkbox.configure(state="normal")
             self.root.after(100, self.poll)
 
     def show_plan(self, result):
+        selection = ReviewSelection(result["plan"])
         self.plan, self.plan_path = result["plan"], result["path"]
+        self.selection = selection
+        self.file_choices, self.edit_choices = {}, {}
+        self.file_widgets = {}
+        self.choice_widgets = self.choice_widgets[:2]
+        for widget in self.choice_form.winfo_children():
+            widget.destroy()
+        for change in self.plan["changes"]:
+            path = change["path"]
+            frame = ttk.Frame(self.choice_form, padding=(2, 6))
+            frame.pack(fill="x")
+            variable = tk.IntVar(value=1)
+            self.file_choices[path] = variable
+            button = ttk.Checkbutton(frame, text=path.rsplit("/", 1)[-1], variable=variable, command=lambda path=path: self.toggle_file(path))
+            button.pack(anchor="w")
+            self.choice_widgets.append(button)
+            self.file_widgets[path] = button
+            ttk.Label(frame, text=path, wraplength=300, font=("Segoe UI", 8)).pack(anchor="w", padx=(20, 0))
+            self.edit_choices[path] = {}
+            for choice in selection.choices[path]:
+                variable = tk.BooleanVar(value=True)
+                self.edit_choices[path][choice.id] = variable
+                row = ttk.Frame(frame)
+                row.pack(fill="x", padx=(20, 0))
+                button = ttk.Checkbutton(row, variable=variable)
+                button.pack(side="left", anchor="n")
+                # A separate wrapping label makes long statements readable and
+                # remains clickable, just like the checkbox beside it.
+                label = ttk.Label(row, text=choice.label, wraplength=260)
+                label.pack(side="left", anchor="w")
+                label.bind("<Button-1>", lambda _, button=button: button.invoke())
+                self.choice_widgets.append(button)
+                variable.trace_add("write", lambda *_: self.selection_changed())
+        self.choice_canvas.yview_moveto(0)
+        self.selection_changed()
+        self.set_selection_enabled(not self.busy)
+        self.tabs.select(self.review)
+        self.status.set(f"Plan ready. Choose the edits to include. Reports saved in {self.plan_path.parent}.")
+
+    def set_selection_enabled(self, enabled):
+        for widget in self.choice_widgets:
+            widget.state(["!disabled" if enabled else "disabled"])
+
+    def selected_edits(self):
+        return {path: {key for key, variable in choices.items() if variable.get()} for path, choices in self.edit_choices.items()}
+
+    def toggle_file(self, path):
+        if self.busy:
+            return
+        self.refreshing_selection = True
+        try:
+            for variable in self.edit_choices[path].values():
+                variable.set(self.file_choices[path].get() == 1)
+        finally:
+            self.refreshing_selection = False
+        self.selection_changed()
+
+    def select_all_edits(self, selected):
+        if self.busy or self.selection is None:
+            return
+        self.refreshing_selection = True
+        try:
+            for choices in self.edit_choices.values():
+                for variable in choices.values():
+                    variable.set(selected)
+        finally:
+            self.refreshing_selection = False
+        self.selection_changed()
+
+    def selection_changed(self):
+        if self.refreshing_selection or self.selection is None:
+            return
+        selected = self.selected_edits()
+        self.review_plan = self.selection.plan_for(selected)
+        for path, choices in self.edit_choices.items():
+            count = len(selected[path])
+            self.file_choices[path].set(0 if not count else 1 if count == len(choices) else -1)
+            self.file_widgets[path].configure(text=f"{path.rsplit('/', 1)[-1]} ({count}/{len(choices)})")
+            self.file_widgets[path].state(["alternate" if 0 < count < len(choices) else "!alternate"])
+        count = sum(len(ids) for ids in selected.values())
+        total = sum(len(choices) for choices in self.edit_choices.values())
+        self.selection_count.set(f"{len(self.review_plan['changes'])} of {len(selected)} files; {count} of {total} edits selected.")
+        self.render_review()
+        self.approved.set(False)
+        self.update_apply()
+
+    def render_review(self):
+        position = self.summary_box.yview()[0]
         self.summary_box.configure(state="normal")
         self.summary_box.delete("1.0", "end")
-        for line in compact_summary(self.plan).splitlines(keepends=True):
+        for line in compact_summary(self.review_plan).splitlines(keepends=True):
             self.summary_box.insert("end", line, review_line_tag(line) or ())
         self.summary_box.configure(state="disabled")
-        self.approved.set(False)
-        self.tabs.select(self.review)
-        self.status.set(f"Plan ready. Reports saved in {self.plan_path.parent}.")
+        self.summary_box.yview_moveto(position)
 
     def check_differences(self):
         if self.busy:
@@ -510,6 +637,8 @@ class App(ttk.Frame):
         try:
             config = self.get_config()
             self.input_hash = digest(canonical(config))
+            self.plan, self.review_plan, self.selection = None, None, None
+            self.approved.set(False)
             self.run(
                 lambda: generate_reports(config),
                 self.show_plan,
@@ -523,6 +652,8 @@ class App(ttk.Frame):
             not self.busy
             and self.plan
             and self.plan["mode"] == "live"
+            and self.review_plan
+            and self.review_plan["changes"]
             and self.approved.get()
         )
         try:
@@ -537,8 +668,16 @@ class App(ttk.Frame):
         self.update_apply()
         if str(self.apply_button["state"]) == "disabled":
             return
-        plan = copy.deepcopy(self.plan)
-        journal = self.plan_path.parent / ("execution-" + plan["digest"][:12] + ".json")
+        plan = copy.deepcopy(self.review_plan)
+        folder = self.plan_path.parent / ("selected-" + plan["digest"][:12])
+        journal = folder / ("execution-" + plan["digest"][:12] + ".json")
+
+        def work():
+            save_plan(plan, folder)
+            return execute(
+                P4CLI(plan["connection"]), plan, plan["digest"],
+                acknowledge_reviews=True, acknowledge_blocked=True, journal_path=journal,
+            )
 
         def complete(result):
             self.approved.set(False)
@@ -561,14 +700,7 @@ class App(ttk.Frame):
                 messagebox.showinfo("Pending changelist", self.status.get())
 
         self.run(
-            lambda: execute(
-                P4CLI(plan["connection"]),
-                plan,
-                plan["digest"],
-                acknowledge_reviews=True,
-                acknowledge_blocked=True,
-                journal_path=journal,
-            ),
+            work,
             complete,
             "Approval received. Checking revisions and workspace before applying exact changes.",
         )

@@ -227,6 +227,7 @@ class DynamicFormTests(unittest.TestCase):
             config = self.app.get_config()
             self.app.input_hash = digest(canonical(config))
             self.app.plan = {"mode": "live"}
+            self.app.review_plan = {"changes": [{}]}
             self.app.approved.set(True)
             self.app.update_apply()
             self.assertEqual("normal", str(self.app.apply_button["state"]))
@@ -269,3 +270,116 @@ class DynamicFormTests(unittest.TestCase):
         self.assertFalse(self.app.approved.get())
         with self.assertRaisesRegex(ValueError, "positive integer"):
             self.app.get_config()
+
+    def review_fixture(self, directory):
+        from bt_delta.demo import fixture
+
+        p4, config = fixture(Path(directory) / "workspace")
+        self.app.set_config(config)
+        config = self.app.get_config()
+        self.app.input_hash = digest(canonical(config))
+        with patch("bt_delta.gui.BASE", Path(directory)), patch("bt_delta.gui.P4CLI", return_value=p4):
+            result = generate_reports(config)
+        self.app.show_plan(result)
+        return p4, result
+
+    def test_uncheck_single_flag_updates_diff_and_clears_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, result = self.review_fixture(directory)
+            path = next(c["path"] for c in result["plan"]["changes"] if "system.board" in c["rules"])
+            choice = next(c for c in self.app.selection.choices[path] if "BOARD_HAVE_BLUETOOTH_SLSI :=" in c.label)
+            self.app.approved.set(True)
+            self.app.update_apply()
+            self.assertEqual("normal", str(self.app.apply_button["state"]))
+            self.app.edit_choices[path][choice.id].set(False)
+            self.assertFalse(self.app.approved.get())
+            self.assertEqual("disabled", str(self.app.apply_button["state"]))
+            self.assertEqual(-1, self.app.file_choices[path].get())
+            self.assertTrue(self.app.file_widgets[path].instate(["alternate"]))
+            self.app.set_selection_enabled(True)
+            self.assertTrue(self.app.file_widgets[path].instate(["alternate"]))
+            diff = next(c["diff"] for c in self.app.review_plan["changes"] if c["path"] == path)
+            self.assertNotIn("+BOARD_HAVE_BLUETOOTH_SLSI", diff)
+            self.assertIn("+BOARD_HAVE_BLUETOOTH := true", diff)
+            self.assertIn(diff, self.app.summary_box.get("1.0", "end"))
+            verify_seal(self.app.plan)
+            self.assertEqual(result["plan"]["digest"], self.app.plan["digest"])
+
+    def test_file_and_all_checkboxes_update_children_and_empty_selection_disables_apply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, result = self.review_fixture(directory)
+            path = result["plan"]["changes"][0]["path"]
+            self.app.file_choices[path].set(0)
+            self.app.toggle_file(path)
+            self.assertFalse(any(v.get() for v in self.app.edit_choices[path].values()))
+            self.assertNotIn(path, [c["path"] for c in self.app.review_plan["changes"]])
+            self.app.file_choices[path].set(1)
+            self.app.toggle_file(path)
+            self.assertTrue(all(v.get() for v in self.app.edit_choices[path].values()))
+            self.app.select_all_edits(False)
+            self.app.approved.set(True)
+            self.app.update_apply()
+            self.assertEqual("disabled", str(self.app.apply_button["state"]))
+            self.assertEqual([], self.app.review_plan["changes"])
+            self.assertIn("0 of", self.app.selection_count.get())
+            with patch.object(self.app, "run") as run:
+                self.app.apply()
+            run.assert_not_called()
+            self.app.select_all_edits(True)
+            self.assertFalse(self.app.approved.get())
+            self.assertEqual(len(result["plan"]["changes"]), len(self.app.review_plan["changes"]))
+
+    def test_apply_uses_selected_plan_and_saves_original_and_selection_separately(self):
+        import base64
+
+        with tempfile.TemporaryDirectory() as directory:
+            p4, result = self.review_fixture(directory)
+            original = result["path"].read_bytes()
+            self.app.select_all_edits(False)
+            path = next(c["path"] for c in result["plan"]["changes"] if "system.board" in c["rules"])
+            choice = next(c for c in self.app.selection.choices[path] if "BOARD_HAVE_BLUETOOTH :=" in c.label)
+            self.app.edit_choices[path][choice.id].set(True)
+            reviewed = self.app.review_plan
+            self.app.approved.set(True)
+
+            def run_now(work, completed, message):
+                completed(work())
+
+            with patch.object(self.app, "run", side_effect=run_now), patch("bt_delta.gui.P4CLI", return_value=p4), patch("bt_delta.gui.messagebox.showinfo"), patch("bt_delta.gui.messagebox.showwarning"):
+                self.app.apply()
+            folder = result["path"].parent / ("selected-" + reviewed["digest"][:12])
+            saved = json.loads((folder / "plan.json").read_text())
+            verify_seal(saved)
+            self.assertEqual(reviewed, saved)
+            self.assertEqual(original, result["path"].read_bytes())
+            self.assertIn("EXCLUDE", (folder / "plan.txt").read_text())
+            self.assertTrue(list(folder.glob("execution-*.json")))
+            self.assertEqual(base64.b64decode(reviewed["changes"][0]["after"]), Path(p4.where(path)).read_bytes())
+            self.assertEqual(1, len([c for c in p4.calls if c[0] in ("edit", "add")]))
+            self.assertIsNone(self.app.plan)
+            self.assertFalse(self.app.approved.get())
+
+    def test_new_plan_resets_choices_and_busy_work_freezes_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, result = self.review_fixture(directory)
+            self.app.select_all_edits(False)
+            self.app.show_plan(result)
+            self.assertTrue(all(v.get() for f in self.app.edit_choices.values() for v in f.values()))
+            self.app.busy = True
+            self.app.set_selection_enabled(False)
+            self.assertTrue(all(w.instate(["disabled"]) for w in self.app.choice_widgets))
+            self.app.select_all_edits(False)
+            self.assertTrue(all(v.get() for f in self.app.edit_choices.values() for v in f.values()))
+            self.app.choice_widgets[2].invoke()
+            self.assertTrue(all(v.get() for f in self.app.edit_choices.values() for v in f.values()))
+
+    def test_failed_regeneration_cannot_apply_old_plan_with_new_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.review_fixture(directory)
+            self.app.values["model"].set("different")
+            with patch.object(self.app, "run"):
+                self.app.generate()
+            self.app.approved.set(True)
+            self.app.update_apply()
+            self.assertIsNone(self.app.plan)
+            self.assertEqual("disabled", str(self.app.apply_button["state"]))
