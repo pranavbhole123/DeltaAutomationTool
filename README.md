@@ -13,7 +13,7 @@ Bundled packs:
 | [qcom-qca.json](checklist/qcom-qca.json) | QCOM-QCA worksheet, including explicit removal rules |
 | [camera-rules.json](examples/camera-rules.json) | Synthetic non-Bluetooth example demonstrating independent inputs, paths and rules |
 
-See [rule authoring](docs/rules.md), [worksheet coverage](CHECKLIST_COVERAGE.md), and the [architecture diagram](docs/architecture.md).
+Start with [rules explained in plain language](docs/rules-explained.md). See [rule authoring](docs/rules.md) for the detailed contract, [worksheet coverage](CHECKLIST_COVERAGE.md), and the [architecture diagram](docs/architecture.md).
 
 Comparison settings are in [slsi.comparison.json](checklist/slsi.comparison.json), [qcom-wcn.comparison.json](checklist/qcom-wcn.comparison.json), and [qcom-qca.comparison.json](checklist/qcom-qca.comparison.json). Each rules file links to its companion with `comparison_file`; paths are relative to the rules file. Copy both files when sharing a pack. The camera example also has a companion. Per-file policies and exclusions are validated by [comparison-v1.schema.json](checklist/comparison-v1.schema.json); `validate-rules` checks both documents together.
 
