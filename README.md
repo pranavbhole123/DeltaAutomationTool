@@ -2,7 +2,7 @@
 
 A Python 3.10+ desktop and command-line tool for comparing reference files with a current Perforce template, proposing focused edits, and applying reviewed changes to a pending changelist.
 
-**One JSON file defines a rule pack:** inputs, sources, file routes, derived values, selectors, conditions, operations and comparison policies. Python provides reusable parsing, discovery and editing operations. Selecting another pack does not require changing Python or registering its rule IDs.
+**One JSON file defines the planning rules:** inputs, sources, file routes, derived values, selectors, conditions and operations. A companion JSON configures changelist comparison. Python provides reusable parsing, discovery and editing operations. Selecting another pack does not require changing Python or registering its rule IDs.
 
 Bundled packs:
 
@@ -14,6 +14,8 @@ Bundled packs:
 | [camera-rules.json](examples/camera-rules.json) | Synthetic non-Bluetooth example demonstrating independent inputs, paths and rules |
 
 See [rule authoring](docs/rules.md), [worksheet coverage](CHECKLIST_COVERAGE.md), and the [architecture diagram](docs/architecture.md).
+
+Comparison settings are in [slsi.comparison.json](checklist/slsi.comparison.json), [qcom-wcn.comparison.json](checklist/qcom-wcn.comparison.json), and [qcom-qca.comparison.json](checklist/qcom-qca.comparison.json). Each rules file links to its companion with `comparison_file`; paths are relative to the rules file. Copy both files when sharing a pack. The camera example also has a companion. Per-file policies and exclusions are validated by [comparison-v1.schema.json](checklist/comparison-v1.schema.json); `validate-rules` checks both documents together.
 
 ## Run
 
@@ -36,7 +38,7 @@ The original plan is retained. Apply saves the exact selected plan, diffs and in
 
 The GUI contains only Inputs and Review & approve. Empty-file previews, detailed reports and runtime diagnostics are saved to disk. Comparison reports are also saved without displaying them. The offline demo is available only through the CLI.
 
-Changing inputs or the loaded JSON invalidates approval. A JSON changed on disk must be reloaded. An invalid selected pack reports an error; it does not silently run the SLSI pack instead.
+Changing inputs or the loaded settings invalidates approval. Changes to either the rules or comparison configuration on disk require reloading the pack. An invalid selected pack reports an error; it does not silently run the SLSI pack instead.
 
 The SLSI pack keeps the optional current build log, JDM and CSC controls. Log identifiers supplement **current** routing only; reference routing remains independent. CSC checks are off by default. Firmware checks verify the configured family/path exists in the mapped depot; they do not read or hash firmware binaries. Content hashes used for reviewed edit integrity and binary-copy comparison are separate from firmware presence checks.
 
@@ -79,7 +81,7 @@ In **1. Inputs → Perforce**, enter one or more numbers in **Changelists (optio
 
 The comparison button requires at least one changelist number. Generating a plan saves the plan, previews and detailed report independently. The comparison button saves `comparison.json`, `comparison.txt` and its blank baseline in a separate comparison report folder; none are displayed in the GUI. It does not replace the current review/apply plan. Reloading the same rule file retains these saved settings; selecting a different pack clears them.
 
-The comparison button generates fresh empty-file previews from the selected rules and reference templates. Rules declare whether a file participates. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview.
+The comparison button generates fresh empty-file previews from the selected rules and reference templates. The companion configuration declares whether a file participates and how its content is compared. SLSI excludes `bdroid_buildcfg.h` from comparison while retaining its copy-if-missing check and preview. The `comparison` object in saved inputs above still holds run options (changelists and source); it is separate from the companion's policies.
 
 | Result | Meaning |
 | --- | --- |

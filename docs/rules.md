@@ -1,8 +1,8 @@
 # JSON rule files, schema 2
 
-A rule pack is one JSON document. It owns domain decisions; the runtime owns generic operations. There is no Python dispatch by pack name, worksheet, chipset or rule ID. `catalog.py` is a compatibility loader, not a second rule catalogue.
+A rule pack defines planning in a JSON document and can link to a companion JSON for changelist comparison. These documents own domain decisions; the runtime owns generic operations. There is no Python dispatch by pack name, worksheet, chipset or rule ID. `catalog.py` is a compatibility loader, not a second rule catalogue.
 
-Start from [camera-rules.json](../examples/camera-rules.json) for a small non-Bluetooth example, or one of the packs in `checklist/`. The formal contract is [rules-v2.schema.json](../checklist/rules-v2.schema.json). Unknown fields, malformed regexes, duplicate JSON keys, unknown references, invalid operation/format combinations and dependency cycles fail validation.
+Start from [camera-rules.json](../examples/camera-rules.json) and [its companion](../examples/camera-rules.comparison.json) for a small non-Bluetooth example, or one of the packs in `checklist/`. The formal contracts are [rules-v2.schema.json](../checklist/rules-v2.schema.json) and [comparison-v1.schema.json](../checklist/comparison-v1.schema.json). Unknown fields, malformed regexes, duplicate JSON keys, unknown references, invalid operation/format combinations and dependency cycles fail validation.
 
 ```sh
 python main.py validate-rules path/to/my-rules.json
@@ -22,10 +22,10 @@ Validation does not query Perforce. Planning validates the pack and inputs befor
 | `lookups` | Data tables such as chip-to-firmware names |
 | `derive` | Named expressions for identifiers, inference and eligibility |
 | `preconditions` | Conditions that must hold before rules run |
-| `files` | File/tree identity, syntax, routes, filters and comparison policy |
+| `files` | File/tree identity, syntax, routes and filters |
 | `rules` | Ordered operations, conditions and dependencies |
 | `report` | Optional report title and changelist description |
-| `comparison` | Conditional exclusions with explanations |
+| `comparison_file` | Optional path to the companion comparison configuration |
 
 `inputs`, `sources`, `files` and `rules` are required; empty objects are allowed where useful. IDs are arbitrary strings. Dotted input names address nested saved JSON; dotted derived names are variable IDs. Do not declare overlapping inputs such as both `current` and `current.model`.
 
@@ -199,7 +199,43 @@ PASS means no change needed for evaluated scope; CHANGE means edits are proposed
 
 ## Comparison requirements
 
-Per-file `comparison` supports:
+The rules document links to the comparison document:
+
+```json
+"comparison_file": "slsi.comparison.json"
+```
+
+Relative paths resolve from the rules file's directory, regardless of the working directory. Absolute paths also work. Companion filenames may be chosen freely; use `*.comparison.json` in `checklist/` so the GUI does not list them as rule packs. Selecting/reloading a pack loads and validates both files automatically. No additional GUI input or CLI argument is needed.
+
+The companion has its own schema version and binds policies to the existing file IDs:
+
+```json
+{
+  "schema_version": 1,
+  "rules_id": "slsi",
+  "files": {
+    "current.system.device_common": {
+      "list_variables": ["PRODUCT_PACKAGES"]
+    },
+    "current.system.root_init": {
+      "latest_scope": "file"
+    },
+    "current.system.bluetooth_header": {
+      "include": false
+    }
+  },
+  "exclude": [
+    {
+      "basename": "bdroid_buildcfg.h",
+      "reason": "Header is excluded from changelist comparison."
+    }
+  ]
+}
+```
+
+`rules_id` must match the rules document's `id`. Every key in companion `files` must be an existing file ID in that rules document; file paths and formats stay in the rules document. Only files needing custom comparison settings need an entry. Unlisted files retain the existing comparison defaults. `exclude` is optional.
+
+Each `files.<file ID>` policy supports:
 
 - `include: false` to exclude a file.
 - `latest_scope: "file"` to search the whole latest init file, or `"context"` (default) to retain event matching.
@@ -207,7 +243,13 @@ Per-file `comparison` supports:
 - `xml_identity` to declare key fields per element name.
 - `mode: "requirements"` for XML/JSON latest checks to follow declared field constraints/merge semantics; default `"reference"` compares preview content.
 
-Top-level `comparison.exclude` entries support `basename` or `path_regex`, plus `when` and `reason`. Exclusions apply to previews and CL files. See SLSI for conditional CSC and header exclusions.
+Companion `exclude` entries support `basename` or `path_regex`, plus `when` and `reason`. Conditions use the same expression language and the inputs/derived values declared in the rules file. Exclusions apply to previews and CL files. See SLSI's companion for conditional CSC and header exclusions.
+
+`python main.py validate-rules path/to/rules.json` validates both files and their references without contacting Perforce. A missing or invalid linked file is an error; it never silently uses default policies. Editing comparison settings requires reloading the GUI pack and invalidates reuse of a preview generated with different effective settings. The loader expands settings into the existing in-memory catalogue and saved plan fields, preserving comparison behavior and integrity checks.
+
+For compatibility, existing schema-2 packs with inline `files.<id>.comparison` and top-level `comparison` remain accepted. Their schemas now reference the companion schema's policy definitions. A pack cannot mix inline policies with `comparison_file`. To migrate, move each per-file policy to companion `files` under the same ID, move `comparison.exclude` to companion `exclude`, and add the link. Packs without comparison settings can omit the link. Programmatic callers with a raw document and a relative link should use `load_spec(path)` or `validate_spec(document, base_dir=rules_directory)`.
+
+Saved-input `comparison.changelists` and `comparison.source` are run options, not comparison policy; they stay in the inputs configuration. Operation fields such as XML identity/field constraints and block matching still belong in `rules`, because they control plan generation too.
 
 Additions first match surviving selected CL additions; uncovered additions are checked in latest depot content. Required removals are separate requirements, using the same selector to establish that unwanted content is absent. Unreadable latest files are errors, not missing. Exact paths remain distinct across branches.
 
@@ -220,7 +262,7 @@ Schema 1 is rejected deliberately: it depended on implicit Python rules and cann
 1. Declare every input, reference/current source and target file route in schema 2.
 2. Move chipset/firmware tables, AP aliases, log regexes and eligibility into `lookups`/`derive`/`when`.
 3. Translate selectors and transformations into explicit operations. Record constants as `literal`; record unspecified human checks as `manual`.
-4. Declare comparison exclusions and context/identity policy; preserve worksheet provenance.
+4. Declare comparison exclusions and context/identity policy in a companion JSON; link it with `comparison_file` and preserve worksheet provenance in the rules.
 5. Validate, inspect a read-only plan, compare expected bytes, and apply only after reviewing the new plan.
 
 Do not reuse approval from a schema-1 plan to validate a new pack. Compatibility helpers remain for existing imports/tests, but do not dispatch live domain rules.

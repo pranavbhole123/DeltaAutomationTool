@@ -10,19 +10,24 @@ from functools import lru_cache
 from pathlib import Path
 
 
-@lru_cache(maxsize=1)
-def rule_schema():
+@lru_cache(maxsize=2)
+def document_schema(name):
+    # Only bundled schemas may be referenced. Never fetch a URI supplied by a pack.
+    if name not in {"rules-v2.schema.json", "comparison-v1.schema.json"}:
+        raise ValueError("Unknown bundled schema: " + name)
     return json.loads(
-        (
-            Path(__file__).resolve().parent.parent / "checklist/rules-v2.schema.json"
-        ).read_text()
+        (Path(__file__).resolve().parent.parent / "checklist" / name).read_text()
     )
 
 
-def validate_document(value):
+def rule_schema():
+    return document_schema("rules-v2.schema.json")
+
+
+def validate_document(value, schema_name="rules-v2.schema.json"):
     from .spec import SpecError
 
-    root = rule_schema()
+    root = document_schema(schema_name)
     types = {
         "object": lambda x: isinstance(x, dict),
         "array": lambda x: isinstance(x, list),
@@ -33,9 +38,14 @@ def validate_document(value):
         "null": lambda x: x is None,
     }
 
-    def check(value, schema, path):
+    def check(value, schema, path, root):
         if "$ref" in schema:
-            return check(value, root["$defs"][schema["$ref"].rsplit("/", 1)[-1]], path)
+            name, fragment = schema["$ref"].split("#", 1)
+            target_root = document_schema(name) if name else root
+            target = target_root
+            for part in fragment.lstrip("/").split("/"):
+                target = target[part]
+            return check(value, target, path, target_root)
         for union in ("oneOf", "anyOf"):
             if union in schema:
                 options = schema[union]
@@ -54,11 +64,11 @@ def validate_document(value):
                         and set(value).issubset(s["properties"])
                     ]
                     if len(candidates) == 1:
-                        return check(value, candidates[0], path)
+                        return check(value, candidates[0], path, root)
                 errors, successes = [], 0
                 for option in options:
                     try:
-                        check(value, option, path)
+                        check(value, option, path, root)
                         successes += 1
                     except SpecError as exc:
                         errors.append(str(exc))
@@ -71,7 +81,7 @@ def validate_document(value):
                             == value["op"]
                         ]
                         if len(matching) == 1:
-                            return check(value, matching[0], path)
+                            return check(value, matching[0], path, root)
                     raise SpecError(
                         path
                         + ": does not match rule grammar ("
@@ -98,18 +108,19 @@ def validate_document(value):
                 sub = props.get(key, schema.get("additionalProperties", {}))
                 if sub is False:
                     raise SpecError(path + ": unknown field " + key)
-                check(child, sub, path + "." + key)
+                check(child, sub, path + "." + key, root)
         if isinstance(value, list):
             if len(value) < schema.get("minItems", 0) or len(value) > schema.get(
                 "maxItems", float("inf")
             ):
                 raise SpecError(path + ": invalid number of entries")
             for i, child in enumerate(value):
-                check(child, schema.get("items", {}), path + f"[{i}]")
+                check(child, schema.get("items", {}), path + f"[{i}]", root)
         if isinstance(value, str):
             if len(value) < schema.get("minLength", 0):
                 raise SpecError(path + ": must not be blank")
             if "pattern" in schema and not re.search(schema["pattern"], value):
                 raise SpecError(path + ": invalid value")
 
-    check(value, root, "rules")
+    label = "comparison" if schema_name == "comparison-v1.schema.json" else "rules"
+    check(value, root, label, root)

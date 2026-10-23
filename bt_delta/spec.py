@@ -1,4 +1,4 @@
-"""Versioned, self-contained rule specifications. No domain defaults live here."""
+"""Versioned rules and companion comparison settings. No domain defaults live here."""
 
 from __future__ import annotations
 
@@ -137,7 +137,60 @@ def input_order(spec):
     return ordered
 
 
-def validate_spec(spec):
+def _read_json(path, label):
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_object
+        )
+    except (OSError, ValueError) as exc:
+        raise SpecError(f"Cannot load {label} file {path}: {exc}") from exc
+
+
+def _resolve_comparison(spec, base_dir):
+    """Expand the companion into the existing runtime shape, preserving plan hashes.
+
+    The source files stay separate. Legacy inline packs and callers holding a
+    resolved catalogue keep working without changing planner/comparison behavior.
+    """
+    if "comparison_file" not in spec:
+        return
+    if "comparison" in spec or any(
+        "comparison" in file for file in spec["files"].values()
+    ):
+        raise SpecError(
+            "comparison_file cannot be combined with inline comparison settings; "
+            "move all comparison policies into the companion file"
+        )
+    path = Path(spec.pop("comparison_file")).expanduser()
+    if not path.is_absolute():
+        if base_dir is None:
+            raise SpecError(
+                "Relative comparison_file requires the rules directory; "
+                "use load_spec(path) or validate_spec(..., base_dir=...)"
+            )
+        path = Path(base_dir) / path
+    path = path.resolve()
+    profile = _read_json(path, "comparison")
+    from .schema import validate_document
+
+    try:
+        validate_document(profile, "comparison-v1.schema.json")
+        if profile["rules_id"] != spec["id"]:
+            raise SpecError(
+                f"rules_id {profile['rules_id']!r} does not match rules pack {spec['id']!r}"
+            )
+        unknown = profile["files"].keys() - spec["files"].keys()
+        if unknown:
+            raise SpecError("Unknown comparison file IDs: " + ", ".join(sorted(unknown)))
+    except SpecError as exc:
+        raise SpecError(f"Invalid comparison file {path}: {exc}") from exc
+    for name, policy in profile["files"].items():
+        spec["files"][name]["comparison"] = policy
+    if "exclude" in profile:
+        spec["comparison"] = {"exclude": profile["exclude"]}
+
+
+def validate_spec(spec, *, base_dir=None):
     spec = copy.deepcopy(spec)
     if not isinstance(spec, dict) or spec.get("schema_version") != 2:
         raise SpecError(
@@ -146,6 +199,7 @@ def validate_spec(spec):
     from .schema import validate_document
 
     validate_document(spec)
+    _resolve_comparison(spec, base_dir)
     _object(
         spec,
         {
@@ -725,13 +779,8 @@ def load_spec(path=None, *, config=None):
         .expanduser()
         .resolve()
     )
-    try:
-        spec = json.loads(
-            path.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_object
-        )
-    except (OSError, ValueError) as exc:
-        raise SpecError(f"Cannot load rules file {path}: {exc}") from exc
-    return validate_spec(spec)
+    spec = _read_json(path, "rules")
+    return validate_spec(spec, base_dir=path.parent)
 
 
 def rule_source(rule):

@@ -170,6 +170,22 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Tab 4 preview inputs differ'):
             compare_changelist(self.p4, other_config, '100', preview_plan=source_plan)
 
+    def test_changed_companion_rejects_stale_preview_before_loading_changelists(self):
+        root = Path(__file__).resolve().parents[1]
+        rules = json.loads((root / 'checklist/slsi.json').read_text())
+        profile = json.loads((root / 'checklist/slsi.comparison.json').read_text())
+        rules_path = Path(self.temp.name) / 'rules.json'
+        profile_path = rules_path.with_name(rules['comparison_file'])
+        rules_path.write_text(json.dumps(rules))
+        profile_path.write_text(json.dumps(profile))
+        self.config['rules_file'] = str(rules_path)
+        source_plan = Planner(self.p4, self.config).build()
+        profile['files']['current.system.root_init']['latest_scope'] = 'context'
+        profile_path.write_text(json.dumps(profile))
+        with patch.object(self.p4, 'describe_change', side_effect=AssertionError('Stale preview')):
+            with self.assertRaisesRegex(ValueError, 'comparison settings changed'):
+                compare_changelist(self.p4, self.config, '100', preview_plan=source_plan)
+
     def test_tab4_preview_with_extracted_log_inputs_can_be_reused(self):
         log = Path(self.temp.name) / 'current.log'
         log.write_text('ro.product.board=s5e8835\nTARGET: m36x\nMODEL: erd8835\n')

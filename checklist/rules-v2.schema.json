@@ -266,41 +266,9 @@
             "additionalProperties": false
           },
           "comparison": {
-            "type": "object",
-            "properties": {
-              "include": {
-                "type": "boolean"
-              },
-              "latest_scope": {
-                "enum": [
-                  "context",
-                  "file"
-                ]
-              },
-              "list_variables": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "xml_identity": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "mode": {
-                "enum": [
-                  "reference",
-                  "requirements"
-                ]
-              }
-            },
-            "required": [],
-            "additionalProperties": false
+            "$ref": "comparison-v1.schema.json#/$defs/file_policy",
+            "deprecated": true,
+            "description": "Legacy inline policy. New packs put policies in the companion comparison file."
           },
           "when": {
             "$ref": "#/$defs/expression"
@@ -411,55 +379,15 @@
       "minItems": 0
     },
     "comparison": {
-      "type": "object",
-      "properties": {
-        "exclude": {
-          "type": "array",
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "basename": {
-                    "type": "string"
-                  },
-                  "reason": {
-                    "type": "string"
-                  },
-                  "when": {
-                    "$ref": "#/$defs/expression"
-                  }
-                },
-                "required": [
-                  "basename"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "path_regex": {
-                    "type": "string"
-                  },
-                  "reason": {
-                    "type": "string"
-                  },
-                  "when": {
-                    "$ref": "#/$defs/expression"
-                  }
-                },
-                "required": [
-                  "path_regex"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          },
-          "minItems": 0
-        }
-      },
-      "required": [],
-      "additionalProperties": false
+      "$ref": "comparison-v1.schema.json#/$defs/exclusions",
+      "deprecated": true,
+      "description": "Legacy inline configuration. New packs use comparison_file."
+    },
+    "comparison_file": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "Comparison configuration path, resolved relative to this rules file. Cannot be combined with inline comparison settings."
     }
   },
   "required": [

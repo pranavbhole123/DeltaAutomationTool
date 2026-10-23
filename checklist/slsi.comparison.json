@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "rules_id": "slsi",
+  "files": {
+    "reference.system.board_config": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.system.bluetooth_header": {
+      "include": false
+    },
+    "reference.system.device_common": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.system.sec_product": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.system.root_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.board_config": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.vendor.device_common": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.vendor.model_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.sec_product": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "reference.vendor.root_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.manifest": {
+      "include": false,
+      "xml_identity": {
+        "hal": [
+          "name"
+        ]
+      }
+    },
+    "reference.vendor.hcf_makefile": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.system.board_config": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.system.bluetooth_header": {
+      "include": false
+    },
+    "current.system.device_common": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.system.sec_product": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.system.root_init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.board_config": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.vendor.device_common": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.vendor.model_init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.sec_product": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    },
+    "current.vendor.root_init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.manifest": {
+      "include": false,
+      "xml_identity": {
+        "hal": [
+          "name"
+        ]
+      }
+    },
+    "current.vendor.hcf_makefile": {
+      "list_variables": [
+        "PRODUCT_PACKAGES"
+      ]
+    }
+  },
+  "exclude": [
+    {
+      "basename": "bdroid_buildcfg.h",
+      "reason": "bdroid_buildcfg.h is excluded from changelist comparison; its normal copy-if-absent rule and tab 4 preview are unchanged."
+    },
+    {
+      "basename": "customer_carrier_feature_plain.json",
+      "when": {
+        "not": {
+          "input": "check_csc_features"
+        }
+      },
+      "reason": "CSC feature checks are disabled; customer_carrier_feature_plain.json changelist entries are excluded."
+    }
+  ]
+}

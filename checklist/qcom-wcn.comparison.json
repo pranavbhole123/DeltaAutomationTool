@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "rules_id": "qcom-wcn",
+  "files": {
+    "reference.system.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.system.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.system.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.system.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.system.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.system.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.system.header": {
+      "include": false
+    },
+    "current.system.header": {
+      "include": false
+    },
+    "reference.vendor.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.header": {
+      "include": false
+    },
+    "current.vendor.header": {
+      "include": false
+    },
+    "reference.vendor.init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.firmware": {},
+    "reference.system.root_init": {
+      "latest_scope": "file"
+    },
+    "current.system.root_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.model_init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.model_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.root_init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.root_init": {
+      "latest_scope": "file"
+    },
+    "reference.vendor.manifest": {
+      "xml_identity": {
+        "hal": [
+          "name",
+          "@format"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "current.vendor.manifest": {
+      "xml_identity": {
+        "hal": [
+          "name",
+          "@format"
+        ]
+      },
+      "mode": "requirements"
+    }
+  },
+  "exclude": [
+    {
+      "basename": "bdroid_buildcfg.h",
+      "reason": "Header is copied only when absent; excluded from CL comparison."
+    }
+  ]
+}

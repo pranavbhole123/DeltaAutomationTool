@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "rules_id": "qcom-qca",
+  "files": {
+    "reference.vendor.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.board": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.packages": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.features": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.header": {
+      "include": false
+    },
+    "current.vendor.header": {
+      "include": false
+    },
+    "reference.vendor.init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.init": {
+      "latest_scope": "file"
+    },
+    "current.vendor.firmware": {},
+    "reference.vendor.base": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "current.vendor.base": {
+      "list_variables": [
+        "PRODUCT_PACKAGES",
+        "BT"
+      ]
+    },
+    "reference.vendor.props": {},
+    "current.vendor.props": {},
+    "reference.vendor.overlay": {
+      "xml_identity": {
+        "integer": [
+          "@name"
+        ],
+        "bool": [
+          "@name"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "current.vendor.overlay": {
+      "xml_identity": {
+        "integer": [
+          "@name"
+        ],
+        "bool": [
+          "@name"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "reference.vendor.manifest": {
+      "mode": "requirements"
+    },
+    "current.vendor.manifest": {
+      "xml_identity": {
+        "hal": [
+          "name",
+          "@format"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "reference.vendor.matrix": {
+      "mode": "requirements"
+    },
+    "current.vendor.matrix": {
+      "xml_identity": {
+        "hal": [
+          "name",
+          "@format"
+        ]
+      },
+      "mode": "requirements"
+    }
+  },
+  "exclude": [
+    {
+      "basename": "bdroid_buildcfg.h",
+      "reason": "Header is copied only when absent; excluded from CL comparison."
+    }
+  ]
+}

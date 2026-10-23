@@ -111,7 +111,7 @@ class App(ttk.Frame):
             values=[
                 str(p)
                 for p in sorted((BASE / "checklist").glob("*.json"))
-                if not p.name.endswith(".schema.json")
+                if not p.name.endswith((".schema.json", ".comparison.json"))
             ],
         )
         self.rules_combo.pack(side="left", fill="x", expand=True)
@@ -294,7 +294,7 @@ class App(ttk.Frame):
             values=[
                 str(p)
                 for p in sorted((BASE / "checklist").glob("*.json"))
-                if not p.name.endswith(".schema.json")
+                if not p.name.endswith((".schema.json", ".comparison.json"))
             ]
         )
         try:
@@ -433,7 +433,7 @@ class App(ttk.Frame):
             fresh_spec = load_spec(result["rules_file"])
             if fresh_spec != self.catalog:
                 raise ValueError(
-                    "Rules file changed on disk. Reload it in tab 1 and generate a fresh plan."
+                    "Rules or comparison settings changed on disk. Reload the pack in tab 1 and generate a fresh plan."
                 )
             return validate(result, self.catalog)
         return result

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "rules_id": "camera-example",
+  "files": {
+    "old.board": {
+      "list_variables": [
+        "CAMERA_MODULES"
+      ]
+    },
+    "old.modules": {
+      "list_variables": [
+        "CAMERA_MODULES"
+      ]
+    },
+    "old.startup": {
+      "latest_scope": "file"
+    },
+    "old.devices": {
+      "xml_identity": {
+        "device": [
+          "@name"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "old.settings": {
+      "mode": "requirements"
+    },
+    "new.board": {
+      "list_variables": [
+        "CAMERA_MODULES"
+      ]
+    },
+    "new.modules": {
+      "list_variables": [
+        "CAMERA_MODULES"
+      ]
+    },
+    "new.startup": {
+      "latest_scope": "file"
+    },
+    "new.devices": {
+      "xml_identity": {
+        "device": [
+          "@name"
+        ]
+      },
+      "mode": "requirements"
+    },
+    "new.settings": {
+      "mode": "requirements"
+    }
+  }
+}

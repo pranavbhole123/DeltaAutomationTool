@@ -63,6 +63,43 @@ class DynamicFormTests(unittest.TestCase):
         self.assertIn("current.system_template", self.app.values)
         self.assertNotIn("ant_support", self.app.values)
 
+    def test_picker_excludes_comparison_configs_and_schemas(self):
+        for reload in (False, True):
+            if reload:
+                self.app.select_rules()
+            names = {Path(path).name for path in self.app.rules_combo["values"]}
+            self.assertEqual({"slsi.json", "qcom-wcn.json", "qcom-qca.json"}, names)
+
+    def test_companion_change_requires_reload_before_generation_or_application(self):
+        from bt_delta.demo import fixture
+
+        with tempfile.TemporaryDirectory() as directory:
+            _, config = fixture(Path(directory) / "workspace")
+            rules = json.loads((ROOT / "checklist/slsi.json").read_text())
+            profile = json.loads((ROOT / "checklist/slsi.comparison.json").read_text())
+            rules_path = Path(directory) / "rules.json"
+            profile_path = rules_path.with_name(rules["comparison_file"])
+            rules_path.write_text(json.dumps(rules))
+            profile_path.write_text(json.dumps(profile))
+            config["rules_file"] = str(rules_path)
+            self.app.set_config(config)
+            config = self.app.get_config()
+            self.app.input_hash = digest(canonical(config))
+            self.app.plan = {"mode": "live"}
+            self.app.review_plan = {"changes": [{}]}
+            self.app.approved.set(True)
+            self.app.update_apply()
+            self.assertEqual("normal", str(self.app.apply_button["state"]))
+            profile["files"]["current.system.root_init"]["latest_scope"] = "context"
+            profile_path.write_text(json.dumps(profile))
+            self.app.update_apply()
+            self.assertEqual("disabled", str(self.app.apply_button["state"]))
+            with self.assertRaisesRegex(ValueError, "comparison settings changed"):
+                self.app.get_config()
+            self.app.select_rules()
+            self.app.get_config()
+            self.assertEqual("context", self.app.catalog["files"]["current.system.root_init"]["comparison"]["latest_scope"])
+
     def test_generated_reports_stay_on_disk_and_review_stays_compact(self):
         from bt_delta.demo import fixture
 
@@ -215,6 +252,9 @@ class DynamicFormTests(unittest.TestCase):
             path = Path(directory) / "rules.json"
             spec = json.loads((ROOT / "examples/camera-rules.json").read_text())
             path.write_text(json.dumps(spec))
+            path.with_name(spec["comparison_file"]).write_text(
+                (ROOT / "examples/camera-rules.comparison.json").read_text()
+            )
             self.app.set_config(
                 {
                     "rules_file": str(path),

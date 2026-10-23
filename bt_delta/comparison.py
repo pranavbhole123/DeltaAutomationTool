@@ -545,7 +545,7 @@ def compare_changelist(
         verify_seal(preview_plan)
         if preview_plan.get("catalog_sha256") != digest(canonical(catalog)):
             raise ValueError(
-                "Rules file changed since the preview; regenerate it before comparison."
+                "Rules or comparison settings changed since the preview; regenerate it before comparison."
             )
         expected = preview_plan.get("input_config", preview_plan["config"])
         if config != expected:

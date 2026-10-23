@@ -522,12 +522,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_sssi/device/${reference.common_device}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.system.bluetooth_header": {
       "source": "reference.system",
@@ -538,10 +533,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_sssi/device/${reference.common_device}/Bluetooth/bdroid_buildcfg.h"
         }
-      ],
-      "comparison": {
-        "include": false
-      }
+      ]
     },
     "reference.system.device_common": {
       "source": "reference.system",
@@ -552,12 +544,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_sssi/device/${reference.common_device}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.system.sec_product": {
       "source": "reference.system",
@@ -568,12 +555,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_sssi/vendor/${reference.common_device}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.system.root_init": {
       "source": "reference.system",
@@ -584,10 +566,7 @@
           "anchor_regex": "/ESSI/android/",
           "relative": "system/core/rootdir/init.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "reference.vendor.bluetooth_folder": {
       "source": "reference.vendor",
@@ -609,12 +588,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_vendor/device/${reference.common_device}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.vendor.device_common": {
       "source": "reference.vendor",
@@ -625,12 +599,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_vendor/device/${reference.common_device}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.vendor.model_init": {
       "source": "reference.vendor",
@@ -645,10 +614,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_vendor/device/${reference.common_device}/init.model.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "reference.vendor.sec_product": {
       "source": "reference.vendor",
@@ -659,12 +625,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${reference.model}_vendor/vendor/${reference.common_device}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.vendor.root_init": {
       "source": "reference.vendor",
@@ -675,10 +636,7 @@
           "anchor_regex": "/ESSI/android/",
           "relative": "system/core/rootdir/init.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "reference.vendor.manifest": {
       "source": "reference.vendor",
@@ -697,15 +655,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/android/",
           "relative": "device/samsung/${reference.ap}/manifest.xml"
         }
-      ],
-      "comparison": {
-        "include": false,
-        "xml_identity": {
-          "hal": [
-            "name"
-          ]
-        }
-      }
+      ]
     },
     "reference.vendor.hcf_makefile": {
       "source": "reference.vendor",
@@ -719,12 +669,7 @@
         {
           "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${reference.chipset}/bluetooth.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "reference.vendor.hcf": {
       "source": "reference.vendor",
@@ -781,12 +726,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_sssi/device/${current.common_device}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.system.bluetooth_header": {
       "source": "current.system",
@@ -797,10 +737,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_sssi/device/${current.common_device}/Bluetooth/bdroid_buildcfg.h"
         }
-      ],
-      "comparison": {
-        "include": false
-      }
+      ]
     },
     "current.system.device_common": {
       "source": "current.system",
@@ -811,12 +748,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_sssi/device/${current.common_device}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.system.sec_product": {
       "source": "current.system",
@@ -827,12 +759,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_sssi/vendor/${current.common_device}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.system.root_init": {
       "source": "current.system",
@@ -843,10 +770,7 @@
           "anchor_regex": "/ESSI/android/",
           "relative": "system/core/rootdir/init.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "current.vendor.bluetooth_folder": {
       "source": "current.vendor",
@@ -868,12 +792,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_vendor/device/${current.common_device}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.vendor.device_common": {
       "source": "current.vendor",
@@ -884,12 +803,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_vendor/device/${current.common_device}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.vendor.model_init": {
       "source": "current.vendor",
@@ -904,10 +818,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_vendor/device/${current.common_device}/init.model.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "current.vendor.sec_product": {
       "source": "current.vendor",
@@ -918,12 +829,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "${current.model}_vendor/vendor/${current.common_device}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.vendor.root_init": {
       "source": "current.vendor",
@@ -934,10 +840,7 @@
           "anchor_regex": "/ESSI/android/",
           "relative": "system/core/rootdir/init.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "current.vendor.manifest": {
       "source": "current.vendor",
@@ -956,15 +859,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/android/",
           "relative": "device/samsung/${current.ap}/manifest.xml"
         }
-      ],
-      "comparison": {
-        "include": false,
-        "xml_identity": {
-          "hal": [
-            "name"
-          ]
-        }
-      }
+      ]
     },
     "current.vendor.hcf_makefile": {
       "source": "current.vendor",
@@ -978,12 +873,7 @@
         {
           "client_relative": "android/vendor/samsung/hardware/vendor/bluetooth/slsi/${current.chipset}/bluetooth.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES"
-        ]
-      }
+      ]
     },
     "current.vendor.hcf": {
       "source": "current.vendor",
@@ -1826,23 +1716,6 @@
     "title": "SLSI Bluetooth delta plan",
     "changelist": "SLSI Bluetooth delta for ${current.model}"
   },
-  "comparison": {
-    "exclude": [
-      {
-        "basename": "bdroid_buildcfg.h",
-        "reason": "bdroid_buildcfg.h is excluded from changelist comparison; its normal copy-if-absent rule and tab 4 preview are unchanged."
-      },
-      {
-        "basename": "customer_carrier_feature_plain.json",
-        "when": {
-          "not": {
-            "input": "check_csc_features"
-          }
-        },
-        "reason": "CSC feature checks are disabled; customer_carrier_feature_plain.json changelist entries are excluded."
-      }
-    ]
-  },
   "preconditions": [
     {
       "condition": {
@@ -1866,5 +1739,6 @@
       },
       "message": "Reference WLAN_VENDOR is not SLSI (8)"
     }
-  ]
+  ],
+  "comparison_file": "slsi.comparison.json"
 }

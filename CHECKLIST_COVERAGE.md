@@ -23,7 +23,7 @@ Source: `159551_BT Delta Checklist.xlsx`. The checked-in JSON packs are the exec
 | B36 | `device.validation` | Manual device checks |
 | B13, B24, B28, C10 | `sheet.review` | Retain worksheet caveats requiring human interpretation |
 
-SLSI routing includes numbered EXYNOS anchors and separate current/reference identifiers. Its firmware lookup, AP candidates, optional current-log extraction, HCF selection and comparison exclusions live in the JSON. Synthetic pre-refactor normal/blank output bytes are regression-tested using `tests/fixtures/slsi-v1-output.json`.
+SLSI routing includes numbered EXYNOS anchors and separate current/reference identifiers. Its firmware lookup, AP candidates, optional current-log extraction and HCF selection live in the rules JSON; comparison policies and exclusions live in `slsi.comparison.json`. QCOM packs likewise link to their own `*.comparison.json` companions. Synthetic pre-refactor normal/blank output bytes are regression-tested using `tests/fixtures/slsi-v1-output.json`.
 
 ## QCOM-WCN — `checklist/qcom-wcn.json`
 

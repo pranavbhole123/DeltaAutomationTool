@@ -1,5 +1,6 @@
 flowchart TD
-    json["Selected JSON rule file<br/>Inputs · sources · routes · selectors<br/>Derivations · operations · comparison policy"]
+    json["Selected JSON rule file<br/>Inputs · sources · routes · selectors<br/>Derivations · operations · comparison_file link"]
+    policies["Companion comparison JSON<br/>File IDs · list normalization · XML identity<br/>Latest-content scope · conditional exclusions"]
     load["spec.py + schema.py<br/>Version/grammar/reference/cycle validation<br/>No pack-name or rule-ID dispatch"]
     inputs["gui.py / cli.py → config.py<br/>Dynamic project inputs + P4 connection<br/>expressions.py: derive values and eligibility"]
     resolve["resolver.py<br/>Declared routes → effective View/root coverage<br/>Exact file / bounded tree queries"]
@@ -12,6 +13,7 @@ flowchart TD
     apply["executor.py<br/>Verify digest, identity, Views, revisions and local state<br/>Create pending CL · write verified bytes · journal<br/>Never auto-shelve or submit"]
     p4["perforce.py<br/>p4 CLI + existing login ticket<br/>Read calls during plan/compare; write calls only during apply"]
     json --> load --> inputs --> resolve --> plan
+    policies --> load
     pure --> plan
     plan --> output --> approval --> apply
     plan --> preview --> compare

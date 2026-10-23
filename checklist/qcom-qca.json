@@ -316,13 +316,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${reference.model}/device/${reference.common}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "current.vendor.board": {
       "source": "current.vendor",
@@ -344,13 +338,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${current.model}/device/${current.common}/BoardConfigCommon.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "reference.vendor.packages": {
       "source": "reference.vendor",
@@ -372,13 +360,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${reference.model}/device/${reference.common}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "current.vendor.packages": {
       "source": "current.vendor",
@@ -400,13 +382,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${current.model}/device/${current.common}/device_common.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "reference.vendor.features": {
       "source": "reference.vendor",
@@ -428,13 +404,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${reference.model}/vendor/${reference.common}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "current.vendor.features": {
       "source": "current.vendor",
@@ -456,13 +426,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${current.model}/vendor/${current.common}/SecProductFeature.common"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "reference.vendor.header": {
       "source": "reference.vendor",
@@ -484,10 +448,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${reference.model}/device/${reference.common}/Bluetooth/bdroid_buildcfg.h"
         }
-      ],
-      "comparison": {
-        "include": false
-      }
+      ]
     },
     "current.vendor.header": {
       "source": "current.vendor",
@@ -509,10 +470,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${current.model}/device/${current.common}/Bluetooth/bdroid_buildcfg.h"
         }
-      ],
-      "comparison": {
-        "include": false
-      }
+      ]
     },
     "reference.vendor.init": {
       "source": "reference.vendor",
@@ -522,10 +480,7 @@
         {
           "client_relative": "android/device/qcom/common/rootdir/etc/init.qcom.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "current.vendor.init": {
       "source": "current.vendor",
@@ -535,10 +490,7 @@
         {
           "client_relative": "android/device/qcom/common/rootdir/etc/init.qcom.rc"
         }
-      ],
-      "comparison": {
-        "latest_scope": "file"
-      }
+      ]
     },
     "current.vendor.firmware": {
       "source": "current.vendor",
@@ -552,8 +504,7 @@
           "anchor_regex": "/Combination/Common/",
           "relative": "vendor/qcom/proprietary/bluetooth/hidl_transport/bt/1.0/default/rome/${current.firmware}"
         }
-      ],
-      "comparison": {}
+      ]
     },
     "reference.vendor.base": {
       "source": "reference.vendor",
@@ -563,13 +514,7 @@
         {
           "client_relative": "android/device/qcom/common/base.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "current.vendor.base": {
       "source": "current.vendor",
@@ -579,13 +524,7 @@
         {
           "client_relative": "android/device/qcom/common/base.mk"
         }
-      ],
-      "comparison": {
-        "list_variables": [
-          "PRODUCT_PACKAGES",
-          "BT"
-        ]
-      }
+      ]
     },
     "reference.vendor.props": {
       "source": "reference.vendor",
@@ -595,8 +534,7 @@
         {
           "client_relative": "android/device/qcom/${reference.ap}/system.prop"
         }
-      ],
-      "comparison": {}
+      ]
     },
     "current.vendor.props": {
       "source": "current.vendor",
@@ -606,8 +544,7 @@
         {
           "client_relative": "android/device/qcom/${current.ap}/system.prop"
         }
-      ],
-      "comparison": {}
+      ]
     },
     "reference.vendor.overlay": {
       "source": "reference.vendor",
@@ -629,18 +566,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${reference.model}/device/${reference.common}/overlay/frameworks/base/core/res/res/values/config.xml"
         }
-      ],
-      "comparison": {
-        "xml_identity": {
-          "integer": [
-            "@name"
-          ],
-          "bool": [
-            "@name"
-          ]
-        },
-        "mode": "requirements"
-      }
+      ]
     },
     "current.vendor.overlay": {
       "source": "current.vendor",
@@ -662,18 +588,7 @@
           "anchor_regex": "/EXYNOS[0-9]*/",
           "relative": "model/${current.model}/device/${current.common}/overlay/frameworks/base/core/res/res/values/config.xml"
         }
-      ],
-      "comparison": {
-        "xml_identity": {
-          "integer": [
-            "@name"
-          ],
-          "bool": [
-            "@name"
-          ]
-        },
-        "mode": "requirements"
-      }
+      ]
     },
     "reference.vendor.manifest": {
       "source": "reference.vendor",
@@ -683,10 +598,7 @@
         {
           "client_relative": "android/device/samsung/common/manifest.xml"
         }
-      ],
-      "comparison": {
-        "mode": "requirements"
-      }
+      ]
     },
     "current.vendor.manifest": {
       "source": "current.vendor",
@@ -696,16 +608,7 @@
         {
           "client_relative": "android/device/samsung/common/manifest.xml"
         }
-      ],
-      "comparison": {
-        "xml_identity": {
-          "hal": [
-            "name",
-            "@format"
-          ]
-        },
-        "mode": "requirements"
-      }
+      ]
     },
     "reference.vendor.matrix": {
       "source": "reference.vendor",
@@ -715,10 +618,7 @@
         {
           "client_relative": "android/vendor/qcom/opensource/core-utils/vendor_framework_compatibility_matrix.xml"
         }
-      ],
-      "comparison": {
-        "mode": "requirements"
-      }
+      ]
     },
     "current.vendor.matrix": {
       "source": "current.vendor",
@@ -728,16 +628,7 @@
         {
           "client_relative": "android/vendor/qcom/opensource/core-utils/vendor_framework_compatibility_matrix.xml"
         }
-      ],
-      "comparison": {
-        "xml_identity": {
-          "hal": [
-            "name",
-            "@format"
-          ]
-        },
-        "mode": "requirements"
-      }
+      ]
     }
   },
   "rules": [
@@ -1404,12 +1295,5 @@
     "title": "QCOM-QCA Delta report",
     "changelist": "QCOM-QCA delta for ${current.model}"
   },
-  "comparison": {
-    "exclude": [
-      {
-        "basename": "bdroid_buildcfg.h",
-        "reason": "Header is copied only when absent; excluded from CL comparison."
-      }
-    ]
-  }
+  "comparison_file": "qcom-qca.comparison.json"
 }

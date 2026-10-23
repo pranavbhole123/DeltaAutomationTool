@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://delta-automation.local/comparison-v1.schema.json",
+  "title": "Delta Automation comparison configuration v1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "rules_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/file_policy"
+      }
+    },
+    "exclude": {
+      "$ref": "#/$defs/exclusion_list"
+    }
+  },
+  "required": [
+    "schema_version",
+    "rules_id",
+    "files"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "file_policy": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "boolean"
+        },
+        "latest_scope": {
+          "enum": [
+            "context",
+            "file"
+          ]
+        },
+        "list_variables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "xml_identity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": {
+          "enum": [
+            "reference",
+            "requirements"
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "exclusions": {
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "$ref": "#/$defs/exclusion_list"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "expression": {
+      "$ref": "rules-v2.schema.json#/$defs/expression"
+    },
+    "exclusion_list": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "basename": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "when": {
+                "$ref": "#/$defs/expression"
+              }
+            },
+            "required": [
+              "basename"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path_regex": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "when": {
+                "$ref": "#/$defs/expression"
+              }
+            },
+            "required": [
+              "path_regex"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minItems": 0
+    }
+  }
+}
