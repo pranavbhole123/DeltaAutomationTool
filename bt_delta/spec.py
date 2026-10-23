@@ -15,6 +15,7 @@ OPERATIONS = {
     "tree.copy_missing",
     "file.exists",
     "path.assert",
+    "make.content",
     "make.ensure",
     "make.packages",
     "make.includes",
@@ -492,6 +493,7 @@ def validate_spec(spec, *, base_dir=None):
                         rule["id"] + ": unknown related file " + step["related"][name]
                     )
             if op in (
+                "make.content",
                 "make.ensure",
                 "make.values",
                 "make.packages",
@@ -509,6 +511,8 @@ def validate_spec(spec, *, base_dir=None):
                     "select", step.get("from", {}).get("select")
                 ):
                     raise SpecError(rule["id"] + ": an explicit selector is required")
+            if op == "make.content" and ("from" not in step or "literal" in step):
+                raise SpecError(rule["id"] + ": make.content requires a reference source")
             if op == "tree.copy_missing" and step.get("pairing", {}).get(
                 "method"
             ) not in ("tree_relative", "view_relative"):
@@ -583,6 +587,7 @@ def validate_spec(spec, *, base_dir=None):
                     "json.merge_missing": {"on_source_missing", "on_target_missing"},
                 }
                 content_ops = {
+                    "make.content",
                     "make.ensure",
                     "make.values",
                     "make.packages",
@@ -602,7 +607,7 @@ def validate_spec(spec, *, base_dir=None):
                     allowed.update(
                         ("on_source_missing", "on_target_missing", "on_empty_selection")
                     )
-                if op in ("make.ensure", "make.values", "text.ensure", "xml.ensure"):
+                if op in ("make.content", "make.ensure", "make.values", "text.ensure", "xml.ensure"):
                     allowed.add("on_value_difference")
                 if op == "init.ensure":
                     allowed.add("context_patterns")
@@ -629,6 +634,7 @@ def validate_spec(spec, *, base_dir=None):
                 ):
                     raise SpecError(f'{rule["id"]}: invalid on_value_difference')
                 if "on_value_difference" in step["policy"] and op not in (
+                    "make.content",
                     "make.ensure",
                     "make.values",
                     "text.ensure",

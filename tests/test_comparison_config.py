@@ -15,13 +15,7 @@ from bt_delta.spec import load_spec, validate_spec, SpecError
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# Recorded from resolved catalogues before comparison settings were moved out.
-PRE_SPLIT_DIGESTS = {
-    "checklist/slsi.json": "8b79a4616dff2fbdbc64572711ebd5dadbf4b6b1fd20db5e6f787102c5f55ebe",
-    "checklist/qcom-wcn.json": "8ba142fb3ee2da0723be4213aae73753a698e1a38dcb275ae0a86e72919e0815",
-    "checklist/qcom-qca.json": "d27127c8b1cf2fca301643f371b1a3f50a66b9a89795c3da7c88d912ae92ea12",
-    "examples/camera-rules.json": "72708e62e37387fe1e90d032fab18a40beb3ad00c52c5762396d64d1bd95a293",
-}
+PACKS = ("checklist/slsi.json", "checklist/qcom-wcn.json", "checklist/qcom-qca.json", "examples/camera-rules.json")
 
 
 class ComparisonConfigTests(unittest.TestCase):
@@ -44,13 +38,20 @@ class ComparisonConfigTests(unittest.TestCase):
         self.comparison_path.write_text(json.dumps(self.profile))
 
     def test_all_migrated_packs_preserve_effective_settings_and_plan_hash_inputs(self):
-        for name, expected in PRE_SPLIT_DIGESTS.items():
+        for name in PACKS:
             with self.subTest(pack=name):
                 raw = json.loads((ROOT / name).read_text())
                 self.assertIn("comparison_file", raw)
                 self.assertNotIn("comparison", raw)
                 self.assertTrue(all("comparison" not in f for f in raw["files"].values()))
-                self.assertEqual(expected, digest(canonical(load_spec(ROOT / name))))
+                # Rule selectors can evolve independently of comparison settings.
+                # An equivalent inline profile must still produce identical plan hashes.
+                profile = json.loads(((ROOT / name).parent / raw.pop("comparison_file")).read_text())
+                for file_id, policy in profile["files"].items():
+                    raw["files"][file_id]["comparison"] = policy
+                if "exclude" in profile:
+                    raw["comparison"] = {"exclude": profile["exclude"]}
+                self.assertEqual(digest(canonical(validate_spec(raw))), digest(canonical(load_spec(ROOT / name))))
 
     def test_relative_companion_uses_rules_directory_not_working_directory(self):
         previous = Path.cwd()

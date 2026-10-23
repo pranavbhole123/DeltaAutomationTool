@@ -1847,6 +1847,47 @@
             "message"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "select": {
+                  "$ref": "#/$defs/select_make_content"
+                }
+              },
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false
+            },
+            "to": {
+              "$ref": "#/$defs/file_ref"
+            },
+            "select": {
+              "$ref": "#/$defs/select_make_content"
+            },
+            "op": {
+              "const": "make.content"
+            },
+            "when": {
+              "$ref": "#/$defs/expression"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "from"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -2174,6 +2215,43 @@
       "required": [
         "path"
       ],
+      "additionalProperties": false
+    },
+    "select_make_content": {
+      "type": "object",
+      "properties": {
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "packages": {
+          "$ref": "#/$defs/select_make_packages"
+        },
+        "includes": {
+          "$ref": "#/$defs/select_make_includes"
+        },
+        "assignments": {
+          "type": "object",
+          "properties": {
+            "assignment_names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assignment_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
       "additionalProperties": false
     }
   }

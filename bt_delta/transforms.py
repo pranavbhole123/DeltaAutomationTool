@@ -326,10 +326,9 @@ def _select_init_stanza(lines: list[str], ranges: list[tuple[int, int]],
     best_score = max(row[0] for row in scored)
     best = [row for row in scored if row[0] == best_score]
     if best_score == 0 or len(best) != 1:
-        details = ", ".join(
-            f"line {start + 1}: exact={exact}, targets={targets}, context={context}"
-            for _, start, _, exact, targets, context in scored)
-        raise TransformError(f"Multiple matching init stanzas remain ambiguous: {event} ({details})")
+        # A missing command needs an event, not an arbitrary choice among
+        # equally suitable actions. The caller can append another same-event action.
+        return None
     return best[0][1], best[0][2]
 
 
@@ -382,40 +381,23 @@ def _init_commands(text: str, action: dict, *, report=None) -> str:
     if not commands:
         return text
     ranges = _init_stanza_ranges(lines, event)
-    if not ranges:
-        commands = [entry for entry in commands if not already_elsewhere(*entry)]
-        if not commands:
-            return text
-        if lines and _continued(lines[-1]):
-            raise TransformError("Cannot append after an unfinished init continuation")
-        return _append(text, [event] + ["    " + command for command, _, _ in commands])
-    if len(ranges) > 1 and all(any(actual == tokens and header == event for _, actual, header in elsewhere.get(key, [])) for _, tokens, key in commands):
-        # All requirements already hold in this event; no insertion site is needed.
-        return text
-    start, end = (ranges[0] if len(ranges) == 1
-                  else _select_init_stanza(lines, ranges, commands, event, action.get("context_patterns", [])))
-    existing = {}
-    for i in range(start + 1, end):
-        code, _ = _comment(_body(lines[i]))
-        tokens = _tokens(code)
-        if tokens:
-            existing.setdefault(_command_key(tokens), []).append((i, tokens))
     missing = []
     for command, tokens, key in commands:
-        found = existing.get(key, [])
+        # Resolve each command across the whole file first. Different commands
+        # can legitimately live in different actions with the same event.
+        found = [(i, actual) for i, actual, header in elsewhere.get(key, []) if header == event]
+        exact = [(i, actual) for i, actual in found if actual == tokens]
+        if exact:
+            _presence(report, f"Init command already present at line {exact[0][0] + 1} in [{event}]: {command}. No duplicate added.")
+            if any(actual != tokens for _, actual in found):
+                _presence(report, f"Other commands for target {key} in [{event}] have different arguments; existing commands are preserved.", review=True)
+            continue
+        if any(actual == tokens for _, actual, _ in elsewhere.get(key, [])):
+            already_elsewhere(command, tokens, key)
+            continue
         if len(found) > 1:
             raise TransformError(f"Duplicate init command target in {event}: {key}")
-        if not found:
-            if not already_elsewhere(command, tokens, key):
-                missing.append("    " + command)
-        elif found[0][1] != tokens:
-            # Replacing a local command must not create an exact duplicate of
-            # the requested command already present in a different action.
-            exact_elsewhere = [record for record in elsewhere.get(key, [])
-                               if record[0] != found[0][0] and record[1] == tokens]
-            if exact_elsewhere:
-                already_elsewhere(command, tokens, key)
-                continue
+        if found:
             i = found[0][0]
             _presence(report, f"Init command target already present at line {i + 1} in [{event}]; update its arguments in place instead of adding a command: {command}.")
             original = lines[i]
@@ -423,12 +405,20 @@ def _init_commands(text: str, action: dict, *, report=None) -> str:
             indent = code[:len(code) - len(code.lstrip())]
             suffix = (code[len(code.rstrip()):] or " ") + comment if comment else ""
             lines[i] = indent + command + suffix + original[len(_body(original)):]
-        else:
-            _presence(report, f"Init command already present at line {found[0][0] + 1} in [{event}]: {command}. No duplicate added.")
-    if missing:
-        prefix = "".join(lines[:end])
-        return _append(prefix, missing) + "".join(lines[end:])
-    return "".join(lines)
+        elif not already_elsewhere(command, tokens, key):
+            missing.append("    " + command)
+    if not missing:
+        return "".join(lines)
+    placement = (ranges[0] if len(ranges) == 1 else
+                 _select_init_stanza(lines, ranges, commands, event, action.get("context_patterns", []))
+                 if ranges else None)
+    if placement is not None:
+        _, end = placement
+        return _append("".join(lines[:end]), missing) + "".join(lines[end:])
+    if lines and _continued(lines[-1]):
+        raise TransformError("Cannot append after an unfinished init continuation")
+    _presence(report, f"Adding missing commands in a new [{event}] action using the reference event; existing actions are preserved.")
+    return _append("".join(lines), [event] + missing)
 
 
 def _parse_xml(text: str):

@@ -262,6 +262,7 @@ Only fields supported by the chosen operation are valid. `select` may appear ins
 | `make.ensure` | Ensure selected Make assignments/includes from the reference |
 | `make.values` | Copy selected scalar Make settings, such as product-feature flags |
 | `make.packages` | Copy selected members of a declared Make list variable |
+| `make.content` | Copy content below selected comment headings, including arbitrary package names, includes, settings and calls |
 | `make.includes` | Copy selected Make include statements |
 | `make.remove` | Remove selected Make settings, statements or list members |
 | `text.ensure` | Ensure selected text lines/settings |
@@ -277,6 +278,10 @@ Only fields supported by the chosen operation are valid. `select` may appear ins
 
 For a package rule, `variable: "PRODUCT_PACKAGES"` identifies the list to edit. `names` or `patterns` select its members. Supported conditional additions retain their guards; unsupported or ambiguous content is reported for review.
 
+The SLSI and QCOM-WCN package rules now use `make.content`. A heading such as `#BT` or `#Bluetooth` selects the statements below it until the next standalone comment. So `msnv12.bin` is selected even though its name does not contain “Bluetooth”. The JSON also declares package and include patterns that search outside those sections. That catches `include .../Bluetooth/Bluetooth.mk` even without a heading. Existing packages/includes anywhere in the current file are reused, and copied conditions remain conditions. All these selectors are configurable in the JSON.
+
+For `init.ensure`, the tool finds the selected commands across all reference sections, including repeated `on boot` or `on post-fs` sections. It then checks the whole current file for each command. Missing commands use the reference event. If several current sections are equally suitable, it adds another section with that same event instead of blocking just because the header repeats. Actual conflicting command arguments still receive review.
+
 For XML, `identity` answers “which element is this?” and `fields` answers “what should we check inside it?” For example, a HAL can be identified by name and format, then checked for version, transport and interface. Field checks can require equality, a subset or a minimum version.
 
 ## 11. `policy`: how to handle exceptions
@@ -289,7 +294,7 @@ For XML, `identity` answers “which element is this?” and `fields` answers �
 | `on_value_difference` | Replace the selected differing value, preserve it, or request review? |
 | `on_missing` | What result should an unsuccessful existence check produce? |
 | `report_current_only` | Should extra current-only settings/files produce review findings? |
-| `context_patterns` | Which surrounding reference commands should an init operation also consider? |
+| `context_patterns` | Which nearby text helps choose where to insert missing init commands? |
 
 Available choices depend on the operation. Copy-if-missing preserves an existing differing file and reports it for review. XML differences default to review. Make scalar differences normally propose replacement unless configured otherwise.
 

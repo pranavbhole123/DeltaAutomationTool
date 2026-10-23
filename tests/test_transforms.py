@@ -161,11 +161,28 @@ class TransformTests(unittest.TestCase):
         result = self.assert_idempotent(source, action)
         self.assertIn("# Fix bluetooth configuration permissions\n    mkdir /data/misc/bluetooth", result)
 
-    def test_init_repeated_event_without_bt_evidence_is_blocked(self):
+    def test_init_repeated_event_without_evidence_adds_reference_event(self):
         source = "on boot\n    setprop first yes\non boot\n    setprop second yes\n"
-        with self.assertRaisesRegex(TransformError, "remain ambiguous"):
-            transform(source, {"type": "init_commands", "event": "on boot",
-                               "commands": ["chmod 0660 /dev/btpower"]})
+        result = self.assert_idempotent(source, {"type": "init_commands", "event": "on boot",
+                                                "commands": ["chmod 0660 /dev/btpower"]})
+        self.assertEqual(result, source + "on boot\n    chmod 0660 /dev/btpower\n")
+
+    def test_init_commands_in_separate_repeated_events_are_updated_in_place(self):
+        source = ("on post-fs\n    chmod 0600 /dev/example\n"
+                  "on post-fs\n    chown root root /dev/example\n")
+        result = self.assert_idempotent(source, {"type": "init_commands", "event": "on post-fs", "commands": [
+            "chmod 0660 /dev/example", "chown bluetooth bluetooth /dev/example"]})
+        self.assertEqual(result, "on post-fs\n    chmod 0660 /dev/example\non post-fs\n    chown bluetooth bluetooth /dev/example\n")
+
+    def test_init_repeated_sections_do_not_hide_command_in_other_event(self):
+        source = ("on boot\n    setprop first yes\non boot\n    setprop second yes\n"
+                  "on init\n    mkdir /data/log/bt 0770 bluetooth bluetooth\n")
+        notices = []
+        result = transform(source, {"type": "init_commands", "event": "on boot", "commands": [
+            "mkdir /data/log/bt 0770 bluetooth bluetooth", "chmod 0660 /dev/btpower"]}, report=notices.append)
+        self.assertEqual(result.count("mkdir /data/log/bt"), 1)
+        self.assertTrue(result.endswith("on boot\n    chmod 0660 /dev/btpower\n"))
+        self.assertTrue(any(n["review"] and "already present elsewhere" in n["message"] for n in notices))
 
     def test_init_stanza_ends_before_service(self):
         source = "on init\n    setprop first yes\nservice demo /system/bin/demo\n    class core\n"

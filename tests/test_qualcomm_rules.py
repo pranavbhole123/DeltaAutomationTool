@@ -183,6 +183,57 @@ class QualcommTests(unittest.TestCase):
     def checks(self, plan):
         return {c["rule"]: c for c in plan["checks"]}
 
+    def test_comment_selected_firmware_and_includes_in_both_plan_modes(self):
+        from test_make_content import MakeContentTests
+
+        for pack in ("qcom-wcn",):
+            self.p4, self.config, self.spec, self.paths, self.reads = fixture(self.root, pack)
+            source = self.paths["reference.vendor.packages"]
+            sample = MakeContentTests.sample.replace("xcover7pro", self.config["model"])
+            self.p4.data[source] = (1, (sample + "# Camera\nPRODUCT_PACKAGES += CameraOnly\n").encode(), "text")
+            for blank in (False, True):
+                with self.subTest(pack=pack, blank=blank):
+                    plan = self.build(blank)
+                    self.assertEqual(self.checks(plan)["vendor.packages"]["status"], "change")
+                    content = self.changes(plan)[self.paths["current.vendor.packages"]]
+                    for member in ("msbtfw12.mbn", "msbtfw12.tlv", "msnv12.bin", "btcoex_cont_config"):
+                        self.assertIn(member, content)
+                    self.assertIn("include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk", content)
+                    self.assertIn("include device/samsung/" + self.config["model"] + "_common/Bluetooth/Bluetooth.mk", content)
+                    self.assertNotIn("CameraOnly", content)
+
+    def test_wcn_all_reported_init_rules_scan_repeated_events(self):
+        self.p4, self.config, self.spec, self.paths, self.reads = fixture(self.root, "qcom-wcn")
+        cases = (
+            ("system.init", "system.root_init", "on property:sys.boot_completed=1"),
+            ("vendor.model_init", "vendor.model_init", "on post-fs"),
+            ("vendor.init", "vendor.init", "on property:sys.boot_completed=1"),
+            ("vendor.root_init", "vendor.root_init", "on late-fs"),
+        )
+        for _, file_id, event in cases:
+            commands = (["mkdir /data/log/bt 0770 bluetooth bluetooth", "mkdir /data/log 0775 system log"]
+                        if file_id == "vendor.root_init" else
+                        ["mkdir /data/misc/bluetooth 0770 bluetooth bluetooth", "chmod 0660 /data/misc/bluetooth/config"])
+            reference = (event + "\n    setprop unrelated.one yes\n" + event +
+                         "\n    " + commands[0] + "\n" + event + "\n    " + commands[1] + "\n")
+            current = event + "\n    setprop unrelated.current yes\n" + event + "\n    setprop keep.current yes\n"
+            self.p4.data[self.paths["reference." + file_id]] = (1, reference.encode(), "text")
+            self.p4.data[self.paths["current." + file_id]] = (1, current.encode(), "text")
+        for blank in (False, True):
+            with self.subTest(blank=blank):
+                plan = self.build(blank)
+                for rule, file_id, event in cases:
+                    self.assertEqual(self.checks(plan)[rule]["status"], "change", self.checks(plan)[rule])
+                    content = self.changes(plan)[self.paths["current." + file_id]]
+                    self.assertIn(event, content)
+                    if file_id == "vendor.root_init":
+                        self.assertEqual(content.count("mkdir /data/log/bt"), 1)
+                        self.assertIn("mkdir /data/log 0775 system log", content)
+                    else:
+                        self.assertEqual(content.count("mkdir /data/misc/bluetooth"), 1)
+                        self.assertIn("chmod 0660 /data/misc/bluetooth/config", content)
+                    self.assertNotIn("unrelated.one", content)
+
     def test_wcn_reference_and_firmware_workflow(self):
         plan = self.run_pack("qcom-wcn")
         self.assert_clean(plan)

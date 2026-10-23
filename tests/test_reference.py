@@ -7,9 +7,32 @@ from bt_delta.planner import Planner
 from bt_delta.blank import BlankPlanner
 from bt_delta.reference import apply_reference_action, augment_actions_from_reference, copy_make_settings
 from bt_delta.transforms import TransformError
+from bt_delta.operations import select_actions, apply_actions
 
 
 class ReferenceTests(unittest.TestCase):
+    def test_init_selects_commands_across_all_repeated_reference_events(self):
+        source = ("on post-fs\n    setprop unrelated keep\n"
+                  "on post-fs\n    mkdir /data/misc/bluetooth 0770 bluetooth bluetooth\n"
+                  "on post-fs\n    # Bluetooth permissions\n    chmod 0660 /dev/example\n"
+                  "on property:sys.boot_completed=1\n    setprop unrelated.one yes\n"
+                  "on property:sys.boot_completed=1\n    setprop unrelated.two yes\n")
+        actions = select_actions("init.ensure", source, {"command_patterns": ["bluetooth"], "comment_patterns": ["Bluetooth"]})
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["event"], "on post-fs")
+        self.assertEqual(actions[0]["commands"], ["mkdir /data/misc/bluetooth 0770 bluetooth bluetooth", "chmod 0660 /dev/example"])
+        self.assertNotIn("unrelated", apply_actions("", actions))
+
+    def test_init_comment_anchor_does_not_leak_between_repeated_actions(self):
+        source = "on late-fs\n# Bluetooth\non late-fs\n    setprop unrelated keep\n"
+        self.assertEqual(select_actions("init.ensure", source, {"comment_patterns": ["Bluetooth"]}), [])
+
+    def test_explicit_init_event_still_limits_reference_selection(self):
+        source = "on init\n    setprop bluetooth.init yes\non boot\n    setprop bluetooth.boot yes\non boot\n    setprop bluetooth.ready yes\n"
+        actions = select_actions("init.ensure", source, {"event": "on boot", "command_patterns": ["bluetooth"]})
+        self.assertNotIn("bluetooth.init", apply_actions("", actions))
+        self.assertIn("bluetooth.ready", apply_actions("", actions))
+
     conditional_block = ('# SS_A2DP_FEATURE\n'
                          'ifeq ($(shell secspfbool SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_AUDIO_HAL), y)\n'
                          'PRODUCT_PACKAGES += \\\n    libsehbluetooth_audio_session\n'
@@ -80,6 +103,26 @@ class ReferenceTests(unittest.TestCase):
                 self.assertIn(self.conditional_block, preview['content'])
                 change = next(c for c in plan['changes'] if 'system.packages' in c['rules'])
                 self.assertIn(self.conditional_block.encode(), base64.b64decode(change['after']))
+
+    def test_slsi_system_and_vendor_copy_comment_blocks_and_keyword_includes(self):
+        from test_make_content import MakeContentTests
+
+        with tempfile.TemporaryDirectory() as root:
+            p4, config = fixture(root)
+            for path in list(p4.data):
+                if 'PROD_BENI' in path and path.endswith('/device_common.mk'):
+                    rev, _, kind = p4.data[path]
+                    p4.data[path] = (rev, (MakeContentTests.sample +
+                        '# other section\ninclude vendor/extra/Bluetooth.mk\nPRODUCT_PACKAGES += DontCopyMe\n').encode(), kind)
+            for builder in (Planner, BlankPlanner):
+                plan = builder(p4, config).build()
+                for rule in ('system.packages', 'vendor.packages'):
+                    check = next(c for c in plan['checks'] if c['rule'] == rule)
+                    self.assertEqual(check['status'], 'change', check)
+                    preview = next(p for p in plan['previews'] if p['rule'] == rule)
+                    self.assertIn('msnv12.bin', preview['content'])
+                    self.assertIn('include vendor/extra/Bluetooth.mk', preview['content'])
+                    self.assertNotIn('DontCopyMe', preview['content'])
 
     def test_copies_values_operators_comments_and_changed_include_path(self):
         source = 'BT ?= false # reference choice\ninclude vendor/new/BluetoothBoardConfigCommon.mk\n'

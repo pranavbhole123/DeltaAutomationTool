@@ -15,6 +15,7 @@ from .transforms import (
     _append,
     transform,
 )
+from .make_content import select_content, apply_content
 from .reference import (
     copy_make_settings,
     augment_actions_from_reference,
@@ -48,6 +49,8 @@ def make_values(text, prefix="", patterns=()):
 
 
 def select_actions(op, reference, select, literal=None, context_patterns=()):
+    if op == "make.content":
+        return select_content(reference, select)
     if op == "make.ensure":
         if literal is not None:
             return [{"type": "assignments", "values": literal}]
@@ -165,7 +168,9 @@ def select_actions(op, reference, select, literal=None, context_patterns=()):
 def apply_actions(text, actions, report=None):
     for action in actions:
         before = text
-        if action["type"] == "reference_assignments":
+        if action["type"] == "make_content":
+            text = apply_content(text, action, report)
+        elif action["type"] == "reference_assignments":
             text = copy_make_settings(
                 text,
                 action["reference"],

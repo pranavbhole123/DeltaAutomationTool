@@ -1037,20 +1037,30 @@
           "to": {
             "file": "current.system.device_common"
           },
-          "op": "make.packages",
-          "select": {
-            "variable": "PRODUCT_PACKAGES",
-            "names": [
-              "BluetoothAgent"
-            ],
-            "patterns": [
-              "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
-            ]
-          },
+          "op": "make.content",
           "policy": {
             "on_source_missing": "skip",
             "on_target_missing": "review",
             "on_empty_selection": "skip"
+          },
+          "select": {
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "packages": {
+              "variable": "PRODUCT_PACKAGES",
+              "names": [
+                "BluetoothAgent"
+              ],
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+              ]
+            },
+            "includes": {
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+              ]
+            }
           }
         }
       ]
@@ -1311,64 +1321,41 @@
           "to": {
             "file": "current.vendor.device_common"
           },
-          "op": "make.packages",
+          "op": "make.content",
+          "policy": {
+            "on_source_missing": "skip",
+            "on_target_missing": "review",
+            "on_empty_selection": "skip"
+          },
           "select": {
-            "variable": "PRODUCT_PACKAGES",
-            "names": [
-              "libbt-vendor",
-              "android.hardware.bluetooth@1.1-impl",
-              "android.hardware.bluetooth@1.1-service"
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
             ],
-            "patterns": [
-              "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
-            ]
-          },
-          "policy": {
-            "on_source_missing": "skip",
-            "on_target_missing": "review",
-            "on_empty_selection": "skip"
-          }
-        },
-        {
-          "from": {
-            "file": "reference.vendor.device_common"
-          },
-          "to": {
-            "file": "current.vendor.device_common"
-          },
-          "op": "make.includes",
-          "select": {
-            "lines": [
-              "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk",
-              "include vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"
-            ],
-            "patterns": [
-              "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
-            ]
-          },
-          "policy": {
-            "on_source_missing": "skip",
-            "on_target_missing": "review",
-            "on_empty_selection": "skip"
-          }
-        },
-        {
-          "from": {
-            "file": "reference.vendor.device_common"
-          },
-          "to": {
-            "file": "current.vendor.device_common"
-          },
-          "op": "make.ensure",
-          "select": {
-            "assignment_names": [
-              "SLSI_WLBT_UNIFIED_FIRMWARE"
-            ]
-          },
-          "policy": {
-            "on_source_missing": "skip",
-            "on_target_missing": "review",
-            "on_empty_selection": "skip"
+            "packages": {
+              "variable": "PRODUCT_PACKAGES",
+              "names": [
+                "libbt-vendor",
+                "android.hardware.bluetooth@1.1-impl",
+                "android.hardware.bluetooth@1.1-service"
+              ],
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+              ]
+            },
+            "includes": {
+              "lines": [
+                "include vendor/samsung/hardware/vendor/bluetooth/bluetooth_device.mk",
+                "include vendor/samsung/hardware/vendor/bluetooth/slsi/{chipset}/bluetooth.mk"
+              ],
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+              ]
+            },
+            "assignments": {
+              "assignment_names": [
+                "SLSI_WLBT_UNIFIED_FIRMWARE"
+              ]
+            }
           }
         }
       ]

@@ -136,6 +136,7 @@ A step refers to files through `from: {file: "..."}` and `to: {file: "..."}`. Re
 | `make.ensure` | Copy selected `assignment_names`, `assignment_patterns`, `include_basenames`; retain reference operators/comments |
 | `make.values` | Copy scalar assignments selected by `prefix`/patterns; default operator `=`, optional explicit `operator` |
 | `make.packages` | Copy selected list members (`names`/`patterns`) under explicit `variable`; preserve enclosing reference guards |
+| `make.content` | Copy Make content below matching comment headings, plus independent package/include/assignment selectors; merge existing statements across the whole current file |
 | `make.includes` | Copy reference include statements selected by `lines`/`patterns` |
 | `make.remove` | Remove selected assignments, include/statement patterns, or members of explicit `variable`; optional guard `within` regex |
 | `text.ensure` | Ensure raw `lines`/`patterns`; optional `identity_pattern` identifies a setting to update, including C preprocessor lines |
@@ -149,7 +150,29 @@ A step refers to files through `from: {file: "..."}` and `to: {file: "..."}`. Re
 
 Make scalar copying does not evaluate Make or copy ambiguous conditional assignments/includes. Conditional additive list entries can be copied with their complete guards. Existing members under different conditions are preserved for review. Member removal retains unrelated members/branches and removes only guards made empty by that edit. `text.ensure.identity_pattern` uses capture groups as the key, or the full matched text when no group exists.
 
-Init editing searches the whole current file for duplicates. An identical command under a different event is preserved with a review notice; it is not relocated automatically. `policy.context_patterns` can select additional surrounding reference commands. Comparison's file-wide presence option is separate from editing semantics.
+Init selection scans all reference actions matching the optional `event`, including repeated headers. Without an explicit event, it scans every event and retains the event of each selected command. An event containing no selected commands is ignored. Editing checks commands across the whole current file first. An identical command under a different event is preserved with a review notice; it is not relocated automatically. A unique same-event target with different arguments is updated in place. Conflicting duplicate targets still need review. For missing commands, `policy.context_patterns` helps choose an insertion location; when repeated actions tie, a new action with the same reference event is appended. Comparison's file-wide presence option is separate from editing semantics.
+
+### Make comment sections
+
+`make.content` requires `from`, `to` and `select`. `select.comment_patterns` matches standalone comments. Everything after a matching heading is selected until the next standalone comment or EOF. A new matching comment starts another section. Blank lines and inline comments do not end a section. Logical continuations and enclosing conditions stay intact, including nested/else branches; unrelated statements inside those conditions are excluded.
+
+```json
+{
+  "op": "make.content",
+  "from": {"file": "reference.vendor.packages"},
+  "to": {"file": "current.vendor.packages"},
+  "select": {
+    "comment_patterns": ["(?i)^\\s*#+\\s*(?:bluetooth|bt)\\b"],
+    "packages": {"variable": "PRODUCT_PACKAGES", "patterns": ["(?i)bluetooth"]},
+    "includes": {"patterns": ["(?i)bluetooth"]},
+    "assignments": {"assignment_names": ["SLSI_WLBT_UNIFIED_FIRMWARE"]}
+  }
+}
+```
+
+The three nested selectors are optional and also search outside comment sections: `packages` accepts `variable`, `names`, `patterns`; `includes` accepts `lines`, `patterns`; `assignments` accepts `assignment_names`, `assignment_patterns`. They select content from the reference, never supply default values. Inside a selected comment section, package names need not match any name or regex. The declared package list is merged member by member, preserving unrelated current members; additions use `+=` to avoid resetting the current list. Conditional list resets remain unsupported. Includes and other selected statements are checked across the destination before insertion. Scalar settings use their name and guard context and respect `on_value_difference` (`replace`, `review`, `preserve`). Other statements use exact logical text. Existing content in differing conditions is preserved with a review notice.
+
+SLSI and QCOM-WCN package rules use this operation. The heading/package/include expressions live in their JSON files; Python contains no Bluetooth-specific selection names. A comment-only section produces no content suggestion. The QCA pack retains its separate package and legacy-removal rules.
 
 ### XML
 

@@ -417,6 +417,27 @@ class GenericWorkflowTests(RuleFixture):
 
 
 class GrammarTests(RuleFixture):
+    def test_make_content_is_configurable_and_validated_before_network(self):
+        step = self.spec["rules"][0]["steps"][0]
+        step.update(op="make.content", select={"comment_patterns": ["^# Camera$"],
+                                               "packages": {"variable": "CAMERA_MODULES"}})
+        self.put("old", "board.mk", "# Camera\nCAMERA_MODULES += arbitrary-driver\ninclude lens.mk\n# Audio\nSKIP := yes\n")
+        plan = self.plan()
+        changed = next(c for c in plan["changes"] if c["path"] == self.path("new", "board.mk"))
+        content = base64.b64decode(changed["after"]).decode()
+        self.assertIn("arbitrary-driver", content)
+        self.assertIn("include lens.mk", content)
+        self.assertNotIn("SKIP", content)
+        mutations = [
+            lambda s: s["rules"][0]["steps"][0]["select"].update(comment_patterns=["["]),
+            lambda s: s["rules"][0]["steps"][0]["select"]["packages"].update(patterns=["["]),
+            lambda s: s["rules"][0]["steps"][0]["select"].update(typo=[]),
+            lambda s: s["rules"][0]["steps"][0].pop("from"),
+            lambda s: s["rules"][0]["steps"][0].update(literal=[]),
+        ]
+        for mutation in mutations:
+            self.invalid_before_network(mutation)
+
     def invalid_before_network(self, update):
         spec = copy.deepcopy(self.spec)
         update(spec)

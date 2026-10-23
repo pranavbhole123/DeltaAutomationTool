@@ -4,7 +4,7 @@ import re
 
 from .transforms import (TransformError, _ASSIGNMENT, _append, _body, _command_key, _comment,
                          _init_stanza_ranges, _make_statements, _newline,
-                         _presence, _select_init_stanza, _tokens, transform)
+                         _presence, _tokens, transform)
 
 
 def _patterns(values, label):
@@ -133,30 +133,28 @@ def _reference_init_commands(text, action):
     ranges = _init_stanza_ranges(lines, event)
     if not ranges:
         return []
-    requested = []
-    for command in action.get("commands", []):
-        tokens = _tokens(command)
-        requested.append((command, tokens, _command_key(tokens)))
-    start, end = (ranges[0] if len(ranges) == 1
-                  else _select_init_stanza(lines, ranges, requested, event, action.get("context_patterns", [])))
     static_keys = {_command_key(_tokens(command)) for command in action.get("commands", [])}
-    selected = []
-    anchored = False
-    for line in lines[start + 1:end]:
-        code, comment = _comment(_body(line))
-        if comment:
-            anchored = _matches(comment_patterns, comment) if comment_patterns else False
-        if not code.strip():
-            if not comment:
-                anchored = False
-            continue
-        tokens = _tokens(code)
-        if not tokens or tokens[0] in ("on", "service", "import"):
-            continue
-        command = code.strip()
-        direct = _matches(command_patterns, command) if command_patterns else False
-        if (direct or anchored or _command_key(tokens) in static_keys) and command not in selected:
-            selected.append(command)
+    selected, seen = [], set()
+    # Repeated event headers are normal in init.rc. Select commands from every
+    # matching action before considering where to place them in the destination.
+    for start, end in ranges:
+        anchored = False
+        for line in lines[start + 1:end]:
+            code, comment = _comment(_body(line))
+            if comment:
+                anchored = _matches(comment_patterns, comment) if comment_patterns else False
+            if not code.strip():
+                if not comment:
+                    anchored = False
+                continue
+            tokens = _tokens(code)
+            if not tokens or tokens[0] in ("on", "service", "import"):
+                continue
+            command = code.strip()
+            direct = _matches(command_patterns, command) if command_patterns else False
+            if (direct or anchored or _command_key(tokens) in static_keys) and tuple(tokens) not in seen:
+                selected.append(command)
+                seen.add(tuple(tokens))
     return selected
 
 

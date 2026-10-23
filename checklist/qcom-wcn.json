@@ -721,22 +721,35 @@
       },
       "steps": [
         {
-          "op": "make.packages",
+          "op": "make.content",
           "from": {
             "file": "reference.system.packages"
           },
           "to": {
             "file": "current.system.packages"
           },
-          "select": {
-            "variable": "PRODUCT_PACKAGES",
-            "names": [
-              "BluetoothAgent"
-            ]
-          },
           "policy": {
             "on_source_missing": "review",
             "on_empty_selection": "review"
+          },
+          "select": {
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "packages": {
+              "variable": "PRODUCT_PACKAGES",
+              "names": [
+                "BluetoothAgent"
+              ],
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+              ]
+            },
+            "includes": {
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+              ]
+            }
           }
         }
       ]
@@ -853,25 +866,38 @@
       },
       "steps": [
         {
-          "op": "make.packages",
+          "op": "make.content",
           "from": {
             "file": "reference.vendor.packages"
           },
           "to": {
             "file": "current.vendor.packages"
           },
-          "select": {
-            "variable": "PRODUCT_PACKAGES",
-            "names": [
-              "android.hardware.bluetooth@1.0-service-qti",
-              "android.hardware.bluetooth@1.0-impl-qti",
-              "android.hardware.bluetooth@1.0-service-qti.rc",
-              "BluetoothAgent"
-            ]
-          },
           "policy": {
             "on_source_missing": "review",
             "on_empty_selection": "review"
+          },
+          "select": {
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "packages": {
+              "variable": "PRODUCT_PACKAGES",
+              "names": [
+                "android.hardware.bluetooth@1.0-service-qti",
+                "android.hardware.bluetooth@1.0-impl-qti",
+                "android.hardware.bluetooth@1.0-service-qti.rc",
+                "BluetoothAgent"
+              ],
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|libbt(?:[-_.]|$)|(?:^|[-_.])bt(?:[-_.]|$)|a2dp)"
+              ]
+            },
+            "includes": {
+              "patterns": [
+                "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|[/_.-])bt(?:[/_.-]|$)|a2dp)"
+              ]
+            }
           }
         }
       ]
