@@ -22,7 +22,7 @@ from .operations import (
     xml_operation,
     xml_selected,
     xml_field,
-    make_values,
+    selected_make_keys,
 )
 from .json_ops import merge_missing, json_object
 from .config import validate
@@ -857,13 +857,11 @@ class Planner:
         )
         changed = self._write(path, after, rule, encoding)
         if step.get("policy", {}).get("report_current_only") and op == "make.values":
-            extra = set(
-                make_values(
-                    text,
-                    select.get("prefix", ""),
-                    select.get("assignment_patterns", []),
-                )
-            ) - set(actions[0]["values"])
+            # A section can contain arbitrary names and conditional flags, so
+            # inspect selected identities rather than assuming one values action.
+            extra = selected_make_keys(text, select) - selected_make_keys(
+                empty, {"assignment_patterns": [".*"]}
+            )
             if extra:
                 notes.append(
                     "Current-only flags preserved for review: "

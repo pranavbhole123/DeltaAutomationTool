@@ -703,6 +703,12 @@
               "BOARD_HAVE_BLUETOOTH_QCOM",
               "BLUETOOTH_UART_DEVICE_PORT",
               "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "include_basenames": [
+              "BluetoothBoardConfigCommon.mk"
             ]
           },
           "policy": {
@@ -771,7 +777,10 @@
             "file": "current.system.features"
           },
           "select": {
-            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_"
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ]
           },
           "policy": {
             "on_source_missing": "review",
@@ -848,6 +857,12 @@
               "BOARD_HAVE_BLUETOOTH_QCOM",
               "BLUETOOTH_UART_DEVICE_PORT",
               "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "include_basenames": [
+              "BluetoothBoardConfigCommon.mk"
             ]
           },
           "policy": {
@@ -919,7 +934,10 @@
             "file": "current.vendor.features"
           },
           "select": {
-            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_"
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ]
           },
           "policy": {
             "on_source_missing": "review",

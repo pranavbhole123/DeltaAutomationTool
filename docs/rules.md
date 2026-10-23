@@ -133,11 +133,11 @@ A step refers to files through `from: {file: "..."}` and `to: {file: "..."}`. Re
 | `file.copy_if_missing` | Copy a complete reference file only if absent; preserve differing existing files and report REVIEW |
 | `tree.copy_missing` | Same behavior for selected tree members, using explicit pairing |
 | `file.exists`, `path.assert` | Check mapped live existence; optional `assert_path` requires an expected substring; no content read/hash |
-| `make.ensure` | Copy selected `assignment_names`, `assignment_patterns`, `include_basenames`; retain reference operators/comments |
-| `make.values` | Copy scalar assignments selected by `prefix`/patterns; default operator `=`, optional explicit `operator` |
-| `make.packages` | Copy selected list members (`names`/`patterns`) under explicit `variable`; preserve enclosing reference guards |
+| `make.ensure` | Copy selected `assignment_names`, `assignment_patterns`, `include_basenames`, plus whole configured comment sections |
+| `make.values` | Copy assignments selected by `prefix`/patterns, plus whole configured comment sections; optional explicit `operator` |
+| `make.packages` | Copy selected list members (`names`/`patterns`) under explicit `variable`, plus whole configured comment sections; preserve reference guards |
 | `make.content` | Copy Make content below matching comment headings, plus independent package/include/assignment selectors; merge existing statements across the whole current file |
-| `make.includes` | Copy reference include statements selected by `lines`/`patterns` |
+| `make.includes` | Copy reference include statements selected by `lines`/`patterns`, plus whole configured comment sections |
 | `make.remove` | Remove selected assignments, include/statement patterns, or members of explicit `variable`; optional guard `within` regex |
 | `text.ensure` | Ensure raw `lines`/`patterns`; optional `identity_pattern` identifies a setting to update, including C preprocessor lines |
 | `text.remove` | Remove selected raw lines without interpreting `#` as a Make comment |
@@ -148,13 +148,27 @@ A step refers to files through `from: {file: "..."}` and `to: {file: "..."}`. Re
 | `assert` | Check an expression, with a failure status/message |
 | `manual` | Report an explicit manual/review instruction and provenance without inventing an edit |
 
-Make scalar copying does not evaluate Make or copy ambiguous conditional assignments/includes. Conditional additive list entries can be copied with their complete guards. Existing members under different conditions are preserved for review. Member removal retains unrelated members/branches and removes only guards made empty by that edit. `text.ensure.identity_pattern` uses capture groups as the key, or the full matched text when no group exists.
+Make copying does not evaluate Make. Without a matching comment section, `make.ensure` and `make.values` retain their original scalar-selection checks, including rejecting ambiguous conditional assignments. With comment selection, the shared Make helper copies reference statements with their enclosing conditions. Duplicate scalar definitions in the same context remain ambiguous. Existing statements under different conditions are preserved for review. Member removal retains unrelated members/branches and removes only guards made empty by that edit. `text.ensure.identity_pattern` uses capture groups as the key, or the full matched text when no group exists.
 
 Init selection scans all reference actions matching the optional `event`, including repeated headers. Without an explicit event, it scans every event and retains the event of each selected command. An event containing no selected commands is ignored. Editing checks commands across the whole current file first. An identical command under a different event is preserved with a review notice; it is not relocated automatically. A unique same-event target with different arguments is updated in place. Conflicting duplicate targets still need review. For missing commands, `policy.context_patterns` helps choose an insertion location; when repeated actions tie, a new action with the same reference event is appended. Comparison's file-wide presence option is separate from editing semantics.
 
 ### Make comment sections
 
-`make.content` requires `from`, `to` and `select`. `select.comment_patterns` matches standalone comments. Everything after a matching heading is selected until the next standalone comment or EOF. A new matching comment starts another section. Blank lines and inline comments do not end a section. Logical continuations and enclosing conditions stay intact, including nested/else branches; unrelated statements inside those conditions are excluded.
+`select.comment_patterns` is available on all reference-based Make copy operations: `make.ensure`, `make.values`, `make.packages`, `make.includes` and `make.content`. They share `bt_delta/make_content.py::select_content`; selection does not depend on a filename. This works for `BoardConfigCommon.mk`, `device_common.mk`, `SecProductFeature.common`, and any declared file using compatible Make syntax.
+
+Everything after a matching standalone comment heading is selected until the next standalone comment or EOF. A new matching comment starts another section. Blank lines and inline comments do not end a section. Logical continuations and enclosing Make/shell conditions stay intact, including nested/else branches; unrelated statements inside those conditions are excluded. Names inside the section need not match another selector. Existing names/prefixes/patterns also select statements elsewhere in the reference.
+
+For example, a board rule can select every flag, include and call below `#BT` while independently keeping `WLAN_CHIP` from a later section:
+
+```json
+"select": {
+  "comment_patterns": ["(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"],
+  "assignment_names": ["WLAN_VENDOR", "WLAN_CHIP"],
+  "include_basenames": ["BluetoothBoardConfigCommon.mk"]
+}
+```
+
+Use that selector with `make.ensure`. For a feature file, use `make.values` with `comment_patterns` and its existing `prefix`. For package files with several independent selection methods, `make.content` requires `from`, `to` and `select`:
 
 ```json
 {
@@ -170,9 +184,11 @@ Init selection scans all reference actions matching the optional `event`, includ
 }
 ```
 
-The three nested selectors are optional and also search outside comment sections: `packages` accepts `variable`, `names`, `patterns`; `includes` accepts `lines`, `patterns`; `assignments` accepts `assignment_names`, `assignment_patterns`. They select content from the reference, never supply default values. Inside a selected comment section, package names need not match any name or regex. The declared package list is merged member by member, preserving unrelated current members; additions use `+=` to avoid resetting the current list. Conditional list resets remain unsupported. Includes and other selected statements are checked across the destination before insertion. Scalar settings use their name and guard context and respect `on_value_difference` (`replace`, `review`, `preserve`). Other statements use exact logical text. Existing content in differing conditions is preserved with a review notice.
+The three nested selectors are optional and also search outside comment sections: `packages` accepts `variable`, `names`, `patterns`; `includes` accepts `lines`, `patterns`, `basenames`; `assignments` accepts `assignment_names`, `assignment_patterns`, `prefix`. They select content from the reference, never supply default values. Inside a selected comment section, package names need not match any name or regex. The declared package list is merged member by member, preserving unrelated current members; additions use `+=` to avoid resetting the current list. Conditional list resets remain unsupported. Includes and other selected statements are checked across the destination before insertion. Scalar settings use their name and guard context and respect `on_value_difference` (`replace`, `review`, `preserve`). A configured include basename identifies an include to update in place; otherwise includes use their full path. Other statements use exact logical text. Existing content in differing conditions is preserved with a review notice. An explicit `operator` on `make.ensure` or `make.values` applies to selected scalar assignments, preserving comments and guards; additive statements stay additive. Without it, section copies retain reference operators (`make.values` without a matching section retains its original default `=`).
 
-SLSI and QCOM-WCN package rules use this operation. The heading/package/include expressions live in their JSON files; Python contains no Bluetooth-specific selection names. A comment-only section produces no content suggestion. The QCA pack retains its separate package and legacy-removal rules.
+SLSI, QCOM-WCN and QCOM-QCA configure this shared selection for their board, package and feature-copy rules. The expressions live in JSON; Python contains no Bluetooth-specific selection names. ANT-specific rules use ANT headings and retain their eligibility conditions. A comment-only section produces no content suggestion. `policy.report_current_only` on feature rules also recognizes arbitrary assignment names in selected sections and reports extra current flags without evaluating their values.
+
+All five Make copy selectors also accept optional `exclude`: an array of selectors with the same fields as `make.remove`. These filter the **reference selection** before copying; they do not remove current content. Use them only for explicit exceptions. QCA declares its existing offload/legacy removals and gated ANT items here, so broad Bluetooth section copying cannot reintroduce removed content or bypass ANT eligibility. Its separate removal rules still edit the current file. The other packs copy their selected Bluetooth sections without exclusions.
 
 ### XML
 

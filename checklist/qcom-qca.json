@@ -659,6 +659,35 @@
               "BUILD_BT_WCNSS",
               "BOARD_HAS_QCA_BT_ROME_PCM_SLAVE",
               "BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "exclude": [
+              {
+                "within": "ifeq.*SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD",
+                "assignment_names": [
+                  "TARGET_HAS_SPLIT_A2DP_FEATURE",
+                  "TARGET_HAS_BTHOST_IPC",
+                  "SEC_BT_DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE"
+                ],
+                "patterns": [
+                  "^\\$\\(eval\\s+\\$\\(call\\s+add-device-manifest,\\s*vendor/samsung/interfaces/bluetooth/a2dp/1\\.0/manifest\\.xml\\)\\)$"
+                ],
+                "variable": "DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE",
+                "member_names": [
+                  "$(SEC_BT_DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE)"
+                ]
+              },
+              {
+                "assignment_names": [
+                  "BOARD_HAVE_ANT_WIRELESS",
+                  "BOARD_ANT_WIRELESS_DEVICE"
+                ]
+              }
+            ],
+            "include_basenames": [
+              "BluetoothBoardConfigCommon.mk"
             ]
           },
           "policy": {
@@ -688,6 +717,9 @@
             "assignment_names": [
               "BOARD_HAVE_ANT_WIRELESS",
               "BOARD_ANT_WIRELESS_DEVICE"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*ant(?:\\b|_)"
             ]
           },
           "policy": {
@@ -740,7 +772,7 @@
       },
       "steps": [
         {
-          "op": "make.packages",
+          "op": "make.content",
           "from": {
             "file": "reference.vendor.packages"
           },
@@ -748,12 +780,51 @@
             "file": "current.vendor.packages"
           },
           "select": {
-            "variable": "PRODUCT_PACKAGES",
-            "names": [
-              "android.hardware.bluetooth@1.0-service-qti",
-              "android.hardware.bluetooth@1.0-impl-qti",
-              "android.hardware.bluetooth@1.0-service-qti.rc",
-              "BluetoothAgent"
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ],
+            "packages": {
+              "variable": "PRODUCT_PACKAGES",
+              "names": [
+                "android.hardware.bluetooth@1.0-service-qti",
+                "android.hardware.bluetooth@1.0-impl-qti",
+                "android.hardware.bluetooth@1.0-service-qti.rc",
+                "BluetoothAgent"
+              ]
+            },
+            "includes": {
+              "patterns": [
+                "(?i)^-?include\\s+.*(?:bluetooth|(?:^|[/_])bt(?:[/_.]|$))"
+              ]
+            },
+            "exclude": [
+              {
+                "variable": "PRODUCT_PACKAGES",
+                "member_names": [
+                  "vendor.samsung.hardware.bluetooth.a2dp@1.0-impl",
+                  "libbthost_if"
+                ],
+                "within": "ifeq.*SEC_PRODUCT_FEATURE_BLUETOOTH_SUPPORT_A2DP_OFFLOAD"
+              },
+              {
+                "lines": [
+                  "include device/samsung/${reference.common}/Bluetooth/Bluetooth.mk"
+                ]
+              },
+              {
+                "variable": "PRODUCT_PACKAGES",
+                "member_names": [
+                  "com.dsi.ant.antradio_library",
+                  "com.dsi.ant.antradio_library.xml",
+                  "com.qualcomm.qti.ant@1.0-impl",
+                  "com.qualcomm.qti.ant@1.0",
+                  "com.qualcomm.qti.ant@1.0_vendor",
+                  "AntHalService",
+                  "ANTPlusPlugins",
+                  "ANTRadioService",
+                  "ANTPlusTest"
+                ]
+              }
             ]
           },
           "policy": {
@@ -791,6 +862,9 @@
               "ANTPlusPlugins",
               "ANTRadioService",
               "ANTPlusTest"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*ant(?:\\b|_)"
             ]
           },
           "policy": {
@@ -948,7 +1022,10 @@
             "file": "current.vendor.features"
           },
           "select": {
-            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_"
+            "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
+            ]
           },
           "policy": {
             "on_source_missing": "review",

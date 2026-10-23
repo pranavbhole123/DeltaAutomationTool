@@ -417,6 +417,28 @@ class GenericWorkflowTests(RuleFixture):
 
 
 class GrammarTests(RuleFixture):
+    def test_comment_selection_on_all_make_copy_ops_is_json_configurable(self):
+        for op, selector in (
+            ("make.ensure", {"assignment_names": ["CAMERA_ENABLED"]}),
+            ("make.values", {"prefix": "CAMERA_"}),
+            ("make.packages", {"variable": "CAMERA_MODULES"}),
+            ("make.includes", {}),
+        ):
+            with self.subTest(op=op):
+                step = self.spec["rules"][0]["steps"][0]
+                step.update(op=op, select=dict(selector, comment_patterns=["^# Camera$"],
+                                               exclude=[{"assignment_names": ["OBSOLETE"]}]))
+                self.put("old", "board.mk", "# Camera\nUNKNOWN := yes\ninclude lens.mk\nOBSOLETE := yes\n# Audio\nSKIP := yes\n")
+                plan = self.plan()
+                content = self.after(plan, "board.mk").decode()
+                self.assertIn("UNKNOWN := yes", content)
+                self.assertIn("include lens.mk", content)
+                self.assertNotIn("OBSOLETE", content)
+                self.assertNotIn("SKIP", content)
+                self.invalid_before_network(lambda s: s["rules"][0]["steps"][0]["select"].update(comment_patterns=["["]))
+                self.invalid_before_network(lambda s: s["rules"][0]["steps"][0]["select"]["exclude"][0].update(patterns=["["]))
+                self.invalid_before_network(lambda s: s["rules"][0]["steps"][0]["select"]["exclude"][0].update(typo=[]))
+
     def test_make_content_is_configurable_and_validated_before_network(self):
         step = self.spec["rules"][0]["steps"][0]
         step.update(op="make.content", select={"comment_patterns": ["^# Camera$"],

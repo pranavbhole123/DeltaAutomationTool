@@ -1015,6 +1015,9 @@
             ],
             "include_basenames": [
               "BluetoothBoardConfigCommon.mk"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
             ]
           },
           "policy": {
@@ -1082,6 +1085,9 @@
             "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
             "assignment_patterns": [
               "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
             ]
           },
           "operator": "=",
@@ -1299,6 +1305,9 @@
             ],
             "include_basenames": [
               "BluetoothBoardConfigCommon.mk"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
             ]
           },
           "policy": {
@@ -1464,6 +1473,9 @@
             "prefix": "SEC_PRODUCT_FEATURE_BLUETOOTH_",
             "assignment_patterns": [
               "(?i)(?:bluetooth|bluedroid|bdroid|(?:^|_)bt(?:_|$)|(?:^|_)a2dp(?:_|$))"
+            ],
+            "comment_patterns": [
+              "(?i)^\\s*#+\\s*(?:bluetooth|bt)(?:\\b|_)"
             ]
           },
           "operator": "=",

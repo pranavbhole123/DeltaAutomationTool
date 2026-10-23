@@ -1975,6 +1975,18 @@
           "items": {
             "type": "string"
           }
+        },
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/select_make_remove"
+          }
         }
       },
       "required": [],
@@ -1990,6 +2002,18 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/select_make_remove"
           }
         }
       },
@@ -2013,6 +2037,18 @@
           "items": {
             "type": "string"
           }
+        },
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/select_make_remove"
+          }
         }
       },
       "required": [
@@ -2033,6 +2069,18 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "comment_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/select_make_remove"
           }
         }
       },
@@ -2227,10 +2275,53 @@
           }
         },
         "packages": {
-          "$ref": "#/$defs/select_make_packages"
+          "type": "object",
+          "properties": {
+            "variable": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "variable"
+          ],
+          "additionalProperties": false
         },
         "includes": {
-          "$ref": "#/$defs/select_make_includes"
+          "type": "object",
+          "properties": {
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "basenames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [],
+          "additionalProperties": false
         },
         "assignments": {
           "type": "object",
@@ -2246,9 +2337,18 @@
               "items": {
                 "type": "string"
               }
+            },
+            "prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/select_make_remove"
+          }
         }
       },
       "minProperties": 1,

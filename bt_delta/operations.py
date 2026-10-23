@@ -15,7 +15,7 @@ from .transforms import (
     _append,
     transform,
 )
-from .make_content import select_content, apply_content
+from .make_content import select_content, apply_content, _entries
 from .reference import (
     copy_make_settings,
     augment_actions_from_reference,
@@ -49,8 +49,29 @@ def make_values(text, prefix="", patterns=()):
 
 
 def select_actions(op, reference, select, literal=None, context_patterns=()):
+    # These are source filters, not destination edits. Keeping them declarative
+    # prevents a broad section copy from proposing content a pack forbids.
+    if literal is None and op.startswith("make."):
+        for exclusion in select.get("exclude", []):
+            reference = remove_content(reference, exclusion, make=True)
     if op == "make.content":
         return select_content(reference, select)
+    if literal is None and select.get("comment_patterns") and op in (
+        "make.ensure", "make.values", "make.packages", "make.includes"
+    ):
+        # No filename or domain-specific dispatch: board, product features,
+        # packages and includes all share the same comment-section selector.
+        content_select = {"comment_patterns": select["comment_patterns"]}
+        if op in ("make.ensure", "make.values"):
+            content_select["assignments"] = select
+            content_select["includes"] = {"basenames": select.get("include_basenames", [])}
+        elif op == "make.packages":
+            content_select["packages"] = select
+        else:
+            content_select["includes"] = select
+        sections = select_content(reference, content_select, require_section=True)
+        if sections is not None:
+            return sections
     if op == "make.ensure":
         if literal is not None:
             return [{"type": "assignments", "values": literal}]
@@ -163,6 +184,22 @@ def select_actions(op, reference, select, literal=None, context_patterns=()):
         if literal is not None
         else augment_actions_from_reference(reference, [action])
     )
+
+
+def selected_make_keys(text, select):
+    """Assignment identities for current-only reporting, without evaluating Make."""
+    for exclusion in select.get("exclude", []):
+        text = remove_content(text, exclusion, make=True)
+    _, entries = _entries(text, select.get("comment_patterns", []))
+    return {
+        entry["assignment"]["key"] for entry in entries
+        if entry["assignment"] and (
+            entry["heading"] is not None
+            or (select.get("prefix") and entry["assignment"]["key"].startswith(select["prefix"]))
+            or matches(entry["assignment"]["key"], select.get("assignment_names", []),
+                       select.get("assignment_patterns", []))
+        )
+    }
 
 
 def apply_actions(text, actions, report=None):

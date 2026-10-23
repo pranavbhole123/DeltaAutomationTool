@@ -98,8 +98,16 @@ def _render(lines, entries, overrides=None):
                    for (first, last), replacement in sorted(spans.items()))
 
 
-def select_content(reference, select):
+def select_content(reference, select, *, require_section=False):
+    """Select whole comment sections and independently selected statements.
+
+    All Make copy operations use this helper when they opt into comment
+    selection. ``None`` lets a caller retain its original selector behavior
+    when the reference contains no matching section with content.
+    """
     lines, entries = _entries(reference, select.get("comment_patterns", []))
+    if require_section and not any(entry["heading"] is not None for entry in entries):
+        return None
     packages, includes, assignments = (select.get(key, {}) for key in ("packages", "includes", "assignments"))
     variable = packages.get("variable")
     selected, overrides = [], {}
@@ -118,24 +126,56 @@ def select_content(reference, select):
                 if not entry["guards"] or chosen != members:
                     overrides[entry["span"]] = _member_statement(variable, chosen)
         elif re.match(r"^-?include\s+", code):
-            if code in includes.get("lines", []) or _matches(code, includes.get("patterns", [])):
+            if (code in includes.get("lines", []) or _matches(code, includes.get("patterns", []))
+                    or code.split(None, 1)[1].rsplit("/", 1)[-1] in includes.get("basenames", [])):
                 selected.append(entry)
         elif assignment and (assignment["key"] in assignments.get("assignment_names", [])
+                             or (assignments.get("prefix") and assignment["key"].startswith(assignments["prefix"]))
                              or _matches(assignment["key"], assignments.get("assignment_patterns", []))):
             selected.append(entry)
+    # Distinct branches are legitimate; multiple scalar definitions in the
+    # same context are ambiguous and must not silently discard a source value.
+    scalars, include_paths = set(), {}
+    for entry in selected:
+        assignment = entry["assignment"]
+        if assignment and assignment["operator"] != "+=" and assignment["key"] != variable:
+            identity = (assignment["key"], entry["context"])
+            if identity in scalars:
+                raise TransformError("Duplicate selected reference assignment: " + assignment["key"])
+            scalars.add(identity)
+        include = re.match(r"^-?include\s+(.+)$", entry["code"])
+        if include and include[1].rsplit("/", 1)[-1] in includes.get("basenames", []):
+            identity = (include[1].rsplit("/", 1)[-1], entry["context"])
+            if identity in include_paths and include_paths[identity] != entry["code"]:
+                raise TransformError("Conflicting selected reference includes: " + identity[0])
+            include_paths[identity] = entry["code"]
     content = _render(lines, selected, overrides)
     return [{"type": "make_content", "reference": content,
+             "include_basenames": includes.get("basenames", []),
              "list_variables": [variable] if variable else []}] if selected else []
 
 
 def apply_content(current, action, report=None):
-    source_lines, source = _entries(action["reference"])
+    reference = action["reference"]
+    if action.get("operator"):
+        # Honor an explicit scalar-operator option without converting additive
+        # statements into resets or discarding reference guards/comments.
+        raw_lines = reference.splitlines(keepends=True)
+        for first, _, logical, _ in _make_statements(reference):
+            assignment = _ASSIGNMENT.match(logical)
+            if assignment and assignment["operator"] != "+=":
+                raw = _ASSIGNMENT.match(raw_lines[first])
+                if raw:
+                    a, b = raw.span("operator")
+                    raw_lines[first] = raw_lines[first][:a] + action["operator"] + raw_lines[first][b:]
+        reference = "".join(raw_lines)
+    source_lines, source = _entries(reference)
     lines, destination = _entries(current)
     # Recover heading spans for selected content, for additions only. Selection
     # has already happened; these comments cannot select unrelated statements.
     heading = None
     by_start = {entry["span"][0]: entry for entry in source}
-    for first, _, logical, _ in _make_statements(action["reference"]):
+    for first, _, logical, _ in _make_statements(reference):
         if not logical.strip() and source_lines[first].lstrip().startswith("#"):
             heading = first
         if first in by_start:
@@ -184,31 +224,51 @@ def apply_content(current, action, report=None):
         if include:
             identity = ("include", include[2])
             found = [other for other in destination if re.match(r"^-?include\s+" + re.escape(include[2]) + r"$", other["code"])]
+            basename = include[2].rsplit("/", 1)[-1]
+            if basename in action.get("include_basenames", []):
+                identity = ("include", basename)
+                found = [other for other in destination
+                         if re.match(r"^-?include\s+", other["code"])
+                         and other["code"].split(None, 1)[1].rsplit("/", 1)[-1] == basename]
+                if sum(other["context"] == context for other in found) > 1:
+                    raise TransformError("Duplicate current includes in the selected context: " + basename)
         elif assignment and assignment["operator"] != "+=":
             identity = ("assignment", assignment["key"])
             found = [other for other in destination if other["assignment"] and other["assignment"]["key"] == assignment["key"]]
+            definitions = [other for other in found if other["assignment"]["operator"] != "+="]
+            if sum(other["context"] == context for other in definitions) > 1:
+                raise TransformError("Duplicate current assignments in the selected context: " + assignment["key"])
+            # An initializer followed by += is a valid reference sequence.
+            # Match its initializer without treating appends as duplicate values.
+            # With only appends in current, retain them for review: inserting a
+            # reset after them would discard existing content.
+            found = definitions or found
         else:
             identity = ("statement", code)
             found = [other for other in destination if other["code"] == code]
         exact = [other for other in found if other["code"] == code]
         if include:
             # Separating whitespace is not an include-mode or path difference.
-            exact = [other for other in found if other["code"].split(None, 1)[0] == include[1]]
+            exact = [other for other in found if other["code"].split(None, 1) == [include[1], include[2]]]
         if exact:
             present(entry, exact, code)
         elif found:
             same = [other for other in found if other["context"] == context]
-            if assignment and assignment["operator"] != "+=" and len(same) == 1:
+            replaceable = ((assignment and assignment["operator"] != "+=")
+                           or (include and basename in action.get("include_basenames", [])))
+            if (replaceable and len(same) == 1
+                    and not (assignment and same[0]["assignment"]["operator"] == "+=")):
+                label = assignment["key"] if assignment else include[2]
                 policy = action.get("on_value_difference", "replace")
                 if policy == "replace":
                     span = same[0]["span"]
                     raw = "".join(source_lines[slice(*entry["span"])])
                     if span in replacements and replacements[span] != raw:
-                        raise TransformError("Conflicting selected reference values for " + assignment["key"])
+                        raise TransformError("Conflicting selected reference values for " + label)
                     replacements[span] = raw
-                    _presence(report, "Updating existing Make setting in place: " + assignment["key"])
+                    _presence(report, "Updating existing Make setting in place: " + label)
                 else:
-                    _presence(report, "Existing value preserved: " + assignment["key"], review=policy == "review")
+                    _presence(report, "Existing value preserved: " + label, review=policy == "review")
             else:
                 present(entry, found, code)
                 _presence(report, "Existing Make statement differs; preserved for review: " + code, review=True)
